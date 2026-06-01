@@ -373,18 +373,20 @@ export function classifyOutcome(row: WorkflowRow): string {
 }
 
 export function bucketForRow(row: WorkflowRow): BucketDefinition {
-  const actionText = `${row.action} ${row.ifInStockAction} ${row.buysmartAction} ${row.validationStatus} ${row.excludedReason} ${row.analystNotes}`.toLowerCase();
+  const decisionText = `${row.action} ${row.ifInStockAction} ${row.buysmartAction} ${row.validationStatus} ${row.excludedReason}`.toLowerCase();
+  const buysmartKey = normalizeKey(row.buysmartAction);
+  const actionKey = normalizeKey(row.action);
   const outcome = row.outcomeReporting || classifyOutcome(row);
   const find = (id: string): BucketDefinition => BUCKET_DEFINITIONS.find((bucket) => bucket.id === id) ?? DEFAULT_BUCKET;
 
   if (row.excluded) return find('vendor-exclusions');
-  if (actionText.includes('missing min') || actionText.includes('missing din') || actionText.includes('invalid information')) return find('data-issues');
-  if (outcome === 'denied' || actionText.includes('denied') || normalizeKey(row.action) === 'NO') return find('denied');
-  if (outcome === 'use right' || actionText.includes('use right')) return find('use-right');
-  if (outcome === 'find alt first' || actionText.includes('find alt')) return find('find-alt');
-  if (outcome === 'send/check with CDM' || actionText.includes('cdm')) return find('cdm-review');
+  if (decisionText.includes('missing min') || decisionText.includes('missing din') || decisionText.includes('invalid information')) return find('data-issues');
+  if (outcome === 'denied' || buysmartKey === 'DENIED' || actionKey === 'NO' || (decisionText.includes('cannot add') && buysmartKey !== 'APPROVED')) return find('denied');
+  if (outcome === 'use right' || decisionText.includes('use right')) return find('use-right');
+  if (outcome === 'find alt first' || decisionText.includes('find alt')) return find('find-alt');
+  if (outcome === 'send/check with CDM' || decisionText.includes('cdm')) return find('cdm-review');
   if (row.needsReview || outcome === 'unresolved exceptions') return find('compliance-review');
-  if (outcome === '1x approved' || normalizeKey(row.action) === '1X' || actionText.includes('approved - 1x')) return find('approved-1x');
+  if (outcome === '1x approved' || actionKey === '1X' || decisionText.includes('approved - 1x')) return find('approved-1x');
   if (outcome === 'approved' || row.buysmartAction.toLowerCase() === 'approved') return find('auto-approved');
   return find('assigned-processing');
 }
