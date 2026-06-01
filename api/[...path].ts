@@ -39,6 +39,10 @@ const manifest: RouteManifest = {
     { method: 'GET', path: '/api/rules', purpose: 'List rule definitions and latest variants.' },
     { method: 'POST', path: '/api/rules/import-daf', purpose: 'Import uploaded DAF workbook or the workspace default DAF workbook.' },
     { method: 'GET', path: '/api/rules/:ruleId', purpose: 'Rule details, version, and variants.' },
+    { method: 'POST', path: '/api/rules/:ruleId/versions', purpose: 'Create a draft version from the current rule.' },
+    { method: 'PATCH', path: '/api/rules/versions/:versionId', purpose: 'Edit draft/ready version metadata and variants.' },
+    { method: 'POST', path: '/api/rules/versions/:versionId/approve', purpose: 'Approve a rule version for execution.' },
+    { method: 'POST', path: '/api/rules/variants/:variantId/test', purpose: 'Test one variant against a row or raw sample without persisting.' },
     { method: 'POST', path: '/api/rules/simulate', purpose: 'Run rules against one row without persisting.' },
     { method: 'POST', path: '/api/runs', purpose: 'Execute approved rule variants against a batch.' },
     { method: 'GET', path: '/api/runs/:runId', purpose: 'Run metadata and counts.' },
@@ -176,6 +180,85 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
+    if (path[0] === 'rules' && path[1] && path[2] === 'versions' && path.length === 3 && req.method === 'POST') {
+      const rules = await store.listRules();
+      const rule = rules.find((item) => item.ruleId === path[1]);
+      if (!rule) throw httpError(404, 'Rule not found.');
+      const draftVersionId = newId();
+      rule.versionId = draftVersionId;
+      rule.versionNumber += 1;
+      rule.status = 'draft';
+      rule.automationLevel = 'guided';
+      rule.updatedAt = new Date().toISOString();
+      rule.variants = rule.variants.map((variant, index) => ({
+        ...variant,
+        id: newId(),
+        ruleVersionId: draftVersionId,
+        runtimeRuleId: `${rule.ruleId}.${String(index + 1).padStart(2, '0')}`,
+        status: 'draft',
+        enabled: false
+      }));
+      await store.replaceRuleCatalog(rules);
+      await store.audit('rule.version.created', 'rule_definition', rule.id, { ruleId: rule.ruleId, versionId: draftVersionId });
+      sendJson(res, 200, { rule });
+      return;
+    }
+
+    if (path[0] === 'rules' && path[1] === 'versions' && path[2] && path.length === 3 && req.method === 'PATCH') {
+      const body = await readJson(req);
+      const rules = await store.listRules();
+      const rule = rules.find((item) => item.versionId === path[2]);
+      if (!rule) throw httpError(404, 'Rule version not found.');
+      if (body['status']) rule.status = stringBody(body['status']) as typeof rule.status;
+      if (body['automationLevel']) rule.automationLevel = stringBody(body['automationLevel']) as typeof rule.automationLevel;
+      if (body['notes']) rule.notes = stringBody(body['notes']);
+      if (Array.isArray(body['variants'])) {
+        const variantsById = new Map(rule.variants.map((variant) => [variant.id, variant]));
+        for (const patch of body['variants'] as Record<string, unknown>[]) {
+          const variant = variantsById.get(stringBody(patch['id']));
+          if (!variant) continue;
+          if (patch['enabled'] !== undefined) variant.enabled = Boolean(patch['enabled']);
+          if (patch['status']) variant.status = stringBody(patch['status']) as typeof variant.status;
+          if (patch['predicateJson'] !== undefined) variant.predicateJson = patch['predicateJson'] as typeof variant.predicateJson;
+          if (patch['actionJson'] !== undefined) variant.actionJson = patch['actionJson'] as typeof variant.actionJson;
+          if (patch['description']) variant.description = stringBody(patch['description']);
+        }
+      }
+      rule.updatedAt = new Date().toISOString();
+      await store.replaceRuleCatalog(rules);
+      await store.audit('rule.version.updated', 'rule_version', path[2], { fields: Object.keys(body) });
+      sendJson(res, 200, { rule });
+      return;
+    }
+
+    if (path[0] === 'rules' && path[1] === 'versions' && path[2] && path[3] === 'approve' && req.method === 'POST') {
+      const rules = await store.listRules();
+      const rule = rules.find((item) => item.versionId === path[2]);
+      if (!rule) throw httpError(404, 'Rule version not found.');
+      rule.status = 'approved';
+      rule.variants = rule.variants.map((variant) => ({
+        ...variant,
+        status: variant.isExecutable ? 'approved' : 'ready',
+        enabled: variant.isExecutable
+      }));
+      rule.updatedAt = new Date().toISOString();
+      await store.replaceRuleCatalog(rules);
+      await store.audit('rule.version.approved', 'rule_version', path[2], { ruleId: rule.ruleId });
+      sendJson(res, 200, { rule });
+      return;
+    }
+
+    if (path[0] === 'rules' && path[1] === 'variants' && path[2] && path[3] === 'test' && req.method === 'POST') {
+      const body = await readJson(req);
+      const rules = await store.listRules();
+      const variant = rules.flatMap((rule) => rule.variants).find((item) => item.id === path[2] || item.runtimeRuleId === path[2]);
+      if (!variant) throw httpError(404, 'Rule variant not found.');
+      const row = await rowFromRequestBody(store, body);
+      const executableVariant = { ...variant, enabled: true, isExecutable: true, status: 'approved' as const };
+      sendJson(res, 200, { before: row, after: executeRow(row, [executableVariant]) });
+      return;
+    }
+
     if (path[0] === 'rules' && path[1] && path.length === 2 && req.method === 'GET') {
       const rule = await store.getRule(path[1]);
       if (!rule) throw httpError(404, 'Rule not found.');
@@ -186,15 +269,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (req.method === 'POST' && pathEquals(path, 'rules', 'simulate')) {
       const body = await readJson(req);
       const rules = await store.listRules();
-      let row: WorkflowRow | null = null;
-      if (body['batchId'] && body['rowId']) {
-        const rows = await store.getRows(stringBody(body['batchId']));
-        row = rows.find((item) => item.id === body['rowId']) ?? null;
-      }
-      if (!row && body['rawRow'] && typeof body['rawRow'] === 'object') {
-        row = createWorkflowRow('simulation', body['rawRow'] as Record<string, JsonValue>, 1, new Date().toISOString(), newId);
-      }
-      if (!row) throw httpError(400, 'Provide batchId + rowId or rawRow.');
+      const row = await rowFromRequestBody(store, body);
       const variants = rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved');
       sendJson(res, 200, { before: row, after: executeRow(row, variants) });
       return;
@@ -234,6 +309,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const message = error instanceof Error ? error.message : 'Unexpected error.';
     sendJson(res, status, { ok: false, error: message });
   }
+}
+
+async function rowFromRequestBody(store: ReturnType<typeof getStore>, body: Record<string, unknown>): Promise<WorkflowRow> {
+  if (body['batchId'] && body['rowId']) {
+    const rows = await store.getRows(stringBody(body['batchId']));
+    const row = rows.find((item) => item.id === body['rowId']);
+    if (row) return row;
+  }
+  if (body['rawRow'] && typeof body['rawRow'] === 'object') {
+    return createWorkflowRow('simulation', body['rawRow'] as Record<string, JsonValue>, 1, new Date().toISOString(), newId);
+  }
+  throw httpError(400, 'Provide batchId + rowId or rawRow.');
 }
 
 function createRuleRun(
