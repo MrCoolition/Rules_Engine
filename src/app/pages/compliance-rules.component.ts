@@ -36,11 +36,11 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
       </article>
       <article class="panel kpi">
         <small>Rules</small>
-        <strong>{{ rules.length }}</strong>
+        <strong>{{ loading ? 'Checking' : rules.length }}</strong>
       </article>
       <article class="panel kpi">
         <small>Executable</small>
-        <strong>{{ executableVariantCount }}</strong>
+        <strong>{{ loading ? 'Checking' : executableVariantCount }}</strong>
       </article>
     </section>
 
@@ -90,12 +90,12 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
             <p>DATABASE_URL must be available in Vercel for persisted batches and rule execution.</p>
           </div>
           <div>
-            <span [class]="rules.length ? 'tag good' : 'tag bad'">DAF rules seeded</span>
-            <p>{{ rules.length }} rule definitions are loaded from the DB catalog.</p>
+            <span [class]="loading ? 'tag info' : rules.length ? 'tag good' : 'tag bad'">{{ loading ? 'Checking rules' : 'DAF rules seeded' }}</span>
+            <p>{{ loading ? 'Loading DB-backed rules.' : rules.length + ' rule definitions are loaded from the DB catalog.' }}</p>
           </div>
           <div>
-            <span [class]="executableVariantCount ? 'tag good' : 'tag bad'">Executable variants</span>
-            <p>{{ executableVariantCount }} approved variants can run against PRF rows.</p>
+            <span [class]="loading ? 'tag info' : executableVariantCount ? 'tag good' : 'tag bad'">Executable variants</span>
+            <p>{{ loading ? 'Checking executable variants.' : executableVariantCount + ' approved variants can run against PRF rows.' }}</p>
           </div>
         </div>
       </article>
@@ -164,7 +164,9 @@ export class ComplianceRulesComponent implements OnInit {
     this.error = '';
     try {
       this.health = await this.api.health();
-      [this.batches, this.rules] = await Promise.all([this.api.listBatches(), this.api.listRules()]);
+      const [batches, seeded] = await Promise.all([this.api.listBatches(), this.api.seedRules(false)]);
+      this.batches = batches;
+      this.rules = seeded.rules;
     } catch (error) {
       this.error = this.errorMessage(error);
     } finally {

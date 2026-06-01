@@ -16,10 +16,10 @@ import type { HealthResponse, RouteManifest } from '../models';
     </section>
 
     <section class="kpi-grid">
-      <article class="panel kpi"><small>Store</small><strong>{{ health?.store || '-' }}</strong></article>
-      <article class="panel kpi"><small>Database</small><strong>{{ health?.databaseConfigured ? 'Neon' : 'Missing' }}</strong></article>
-      <article class="panel kpi"><small>Rules</small><strong>{{ health?.ruleCount ?? '-' }}</strong></article>
-      <article class="panel kpi"><small>Executable</small><strong>{{ health?.executableVariantCount ?? '-' }}</strong></article>
+      <article class="panel kpi"><small>Store</small><strong>{{ loading ? 'Checking' : health?.store || '-' }}</strong></article>
+      <article class="panel kpi"><small>Database</small><strong>{{ loading ? 'Checking' : health?.databaseConfigured ? 'Neon' : 'Missing' }}</strong></article>
+      <article class="panel kpi"><small>Rules</small><strong>{{ loading ? 'Checking' : (health?.ruleCount ?? '-') }}</strong></article>
+      <article class="panel kpi"><small>Executable</small><strong>{{ loading ? 'Checking' : (health?.executableVariantCount ?? '-') }}</strong></article>
     </section>
 
     @if (message) {
@@ -99,13 +99,19 @@ export class SettingsComponent implements OnInit {
   health: HealthResponse | null = null;
   manifest: RouteManifest | null = null;
   message = '';
+  loading = true;
 
   ngOnInit(): void {
     void this.refresh();
   }
 
   async refresh(): Promise<void> {
-    [this.health, this.manifest] = await Promise.all([this.api.health(), this.api.routes()]);
+    this.loading = true;
+    try {
+      [this.health, this.manifest] = await Promise.all([this.api.health(), this.api.routes()]);
+    } finally {
+      this.loading = false;
+    }
   }
 
   async bootstrap(): Promise<void> {

@@ -114,7 +114,9 @@ export class ExecutionConsoleComponent implements OnInit {
   }
 
   async refresh(): Promise<void> {
-    [this.batches, this.rules] = await Promise.all([this.api.listBatches(), this.api.listRules()]);
+    const [batches, seeded] = await Promise.all([this.api.listBatches(), this.api.seedRules(false)]);
+    this.batches = batches;
+    this.rules = seeded.rules;
     this.selectedBatchId ||= this.batches[0]?.id ?? '';
   }
 

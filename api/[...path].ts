@@ -353,12 +353,13 @@ async function getSeededRuleCatalog(
   store: ReturnType<typeof getStore>,
   force = false
 ): Promise<{ rules: RuleDefinition[]; report: RuleImportReport; seeded: boolean }> {
-  await store.bootstrap();
-  const existingRules = await store.listRules();
+  if (force) await store.bootstrap();
+  const existingRules = await listRulesWithSchemaRepair(store);
   if (!force && existingRules.length > 0) {
     return { rules: existingRules, report: reportFromRules(existingRules), seeded: false };
   }
 
+  if (!force) await store.bootstrap();
   const { rules, report } = buildRuleCatalog(DEFAULT_DAF_PARSED_WORKBOOK);
   try {
     await store.replaceRuleCatalog(rules);
@@ -373,6 +374,15 @@ async function getSeededRuleCatalog(
     const recoveredRules = await store.listRules().catch(() => []);
     if (recoveredRules.length > 0) return { rules: recoveredRules, report: reportFromRules(recoveredRules), seeded: false };
     throw error;
+  }
+}
+
+async function listRulesWithSchemaRepair(store: ReturnType<typeof getStore>): Promise<RuleDefinition[]> {
+  try {
+    return await store.listRules();
+  } catch {
+    await store.bootstrap();
+    return store.listRules();
   }
 }
 

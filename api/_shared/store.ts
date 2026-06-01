@@ -267,9 +267,7 @@ class NeonStore implements RulesStore {
   }
 
   async replaceRows(batchId: string, rows: WorkflowRow[]): Promise<void> {
-    for (const row of rows) {
-      await updateWorkflowRow(row);
-    }
+    await upsertWorkflowRows(rows);
     await query(`update source_batches set status = 'processed', updated_at = now() where id = $1`, [batchId]);
   }
 
@@ -395,24 +393,7 @@ class NeonStore implements RulesStore {
         run.completedAt
       ]
     );
-    for (const result of results) {
-      await query(
-        `insert into row_execution_results
-          (id, run_id, workflow_row_id, before_state, after_state, trace, rules_applied, validations, created_at)
-         values ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9)`,
-        [
-          result.id,
-          result.runId,
-          result.workflowRowId,
-          JSON.stringify(result.beforeState),
-          JSON.stringify(result.afterState),
-          JSON.stringify(result.trace),
-          JSON.stringify(result.rulesApplied),
-          JSON.stringify(result.validations),
-          result.createdAt
-        ]
-      );
-    }
+    await insertRowExecutionResults(results);
     await this.replaceRows(run.batchId, rows);
     await this.audit('rules.executed', 'rule_run', run.id, { batchId: run.batchId, changed: run.changedRowCount });
     return run;
@@ -438,23 +419,133 @@ class NeonStore implements RulesStore {
 }
 
 async function insertWorkflowRows(rows: WorkflowRow[]): Promise<void> {
-  for (const row of rows) {
+  await writeWorkflowRows(rows, false);
+}
+
+async function upsertWorkflowRows(rows: WorkflowRow[]): Promise<void> {
+  await writeWorkflowRows(rows, true);
+}
+
+async function writeWorkflowRows(rows: WorkflowRow[], upsert: boolean): Promise<void> {
+  const columns = workflowRowColumns();
+  const casts = workflowRowCasts();
+  for (const chunk of chunkArray(rows, 75)) {
+    if (chunk.length === 0) continue;
+    const params = chunk.flatMap(workflowRowParams);
+    const valuesSql = chunk.map((_, index) => placeholderGroup(index * columns.length, columns.length, casts)).join(',');
+    const conflictSql = upsert
+      ? ` on conflict (id) do update set ${columns
+          .filter((column) => column !== 'id')
+          .map((column) => `${column} = excluded.${column}`)
+          .join(', ')}`
+      : '';
     await query(
-      `insert into workflow_rows
-        (id, batch_id, source_row_number, workflow_request_key, raw_row, normalized_row, business, request_type,
-         case_number, date_created, sector, division, unit_name, unit_number, vendor, din, min, manufacturer,
-         brand, description, parent_category, sub_category, usage_qty, one_time_or_permanent, reason_for_request,
-         dpl, meets_criteria, in_cat, on_mog, pantry, k12_apl, compass_apl, conversion_din, conversion_va_pct,
-         upstream_action, upstream_if_in_stock_action, action, if_in_stock_action, buysmart_action, rule_applied,
-         execution_trace, needs_review, analyst_notes, validation_status, excluded, excluded_reason, queue_bucket,
-         request_bucket, outcome_reporting, selected, assignment, status, last_sync_at, last_saved_at, created_at, updated_at)
-       values
-        ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
-         $26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41::jsonb,$42,$43,$44,$45,$46,$47,$48,$49,$50,
-         $51,$52,$53,$54,$55,$56)`,
-      workflowRowParams(row)
+      `insert into workflow_rows (${columns.join(', ')}) values ${valuesSql}${conflictSql}`,
+      params
     );
   }
+}
+
+async function insertRowExecutionResults(results: RowExecutionResult[]): Promise<void> {
+  const columns = ['id', 'run_id', 'workflow_row_id', 'before_state', 'after_state', 'trace', 'rules_applied', 'validations', 'created_at'];
+  const casts = ['', '', '', '::jsonb', '::jsonb', '::jsonb', '::jsonb', '::jsonb', ''];
+  for (const chunk of chunkArray(results, 50)) {
+    if (chunk.length === 0) continue;
+    const params = chunk.flatMap((result) => [
+      result.id,
+      result.runId,
+      result.workflowRowId,
+      JSON.stringify(result.beforeState),
+      JSON.stringify(result.afterState),
+      JSON.stringify(result.trace),
+      JSON.stringify(result.rulesApplied),
+      JSON.stringify(result.validations),
+      result.createdAt
+    ]);
+    const valuesSql = chunk.map((_, index) => placeholderGroup(index * columns.length, columns.length, casts)).join(',');
+    await query(`insert into row_execution_results (${columns.join(', ')}) values ${valuesSql}`, params);
+  }
+}
+
+function workflowRowColumns(): string[] {
+  return [
+    'id',
+    'batch_id',
+    'source_row_number',
+    'workflow_request_key',
+    'raw_row',
+    'normalized_row',
+    'business',
+    'request_type',
+    'case_number',
+    'date_created',
+    'sector',
+    'division',
+    'unit_name',
+    'unit_number',
+    'vendor',
+    'din',
+    'min',
+    'manufacturer',
+    'brand',
+    'description',
+    'parent_category',
+    'sub_category',
+    'usage_qty',
+    'one_time_or_permanent',
+    'reason_for_request',
+    'dpl',
+    'meets_criteria',
+    'in_cat',
+    'on_mog',
+    'pantry',
+    'k12_apl',
+    'compass_apl',
+    'conversion_din',
+    'conversion_va_pct',
+    'upstream_action',
+    'upstream_if_in_stock_action',
+    'action',
+    'if_in_stock_action',
+    'buysmart_action',
+    'rule_applied',
+    'execution_trace',
+    'needs_review',
+    'analyst_notes',
+    'validation_status',
+    'excluded',
+    'excluded_reason',
+    'queue_bucket',
+    'request_bucket',
+    'outcome_reporting',
+    'selected',
+    'assignment',
+    'status',
+    'last_sync_at',
+    'last_saved_at',
+    'created_at',
+    'updated_at'
+  ];
+}
+
+function workflowRowCasts(): string[] {
+  const casts = Array(workflowRowColumns().length).fill('');
+  casts[4] = '::jsonb';
+  casts[5] = '::jsonb';
+  casts[40] = '::jsonb';
+  return casts;
+}
+
+function placeholderGroup(offset: number, count: number, casts: string[]): string {
+  return `(${Array.from({ length: count }, (_, index) => `$${offset + index + 1}${casts[index] ?? ''}`).join(',')})`;
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 async function updateWorkflowRow(row: WorkflowRow): Promise<void> {

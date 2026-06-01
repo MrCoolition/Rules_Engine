@@ -25,9 +25,9 @@ import type { RuleDefinition } from '../models';
         <input [(ngModel)]="filter" placeholder="R001, Canada, approval, manual">
       </label>
       <div class="rule-totals">
-        <span class="tag info">{{ rules.length }} definitions</span>
-        <span class="tag good">{{ executableCount }} executable</span>
-        <span class="tag warn">{{ manualCount }} guided/manual</span>
+        <span class="tag info">{{ loading ? 'Checking' : rules.length + ' definitions' }}</span>
+        <span class="tag good">{{ loading ? 'Checking' : executableCount + ' executable' }}</span>
+        <span class="tag warn">{{ loading ? 'Checking' : manualCount + ' guided/manual' }}</span>
       </div>
     </section>
 
@@ -192,7 +192,9 @@ export class RuleCatalogComponent implements OnInit {
     this.loading = true;
     this.error = '';
     try {
-      this.rules = await this.api.listRules();
+      const result = await this.api.seedRules(false);
+      this.rules = result.rules;
+      this.message = result.seeded ? `Loaded ${result.rules.length} DAF-derived rules into the database.` : '';
     } catch (error) {
       this.error = this.errorMessage(error);
     } finally {

@@ -327,7 +327,7 @@ export class UploadIngestComponent implements OnInit {
       const upload = await this.api.uploadWorkbook(this.sourceFile, this.reportingDate, this.batchName);
       this.latestBatchId = upload.batchId;
 
-      this.busyLabel = 'Running rules';
+      this.busyLabel = 'Executing rules';
       const result = await this.api.runBatch(upload.batchId, false);
       this.run = result.run;
 
@@ -359,7 +359,8 @@ export class UploadIngestComponent implements OnInit {
     this.readinessError = '';
     try {
       this.health = await this.api.health();
-      this.rules = await this.api.listRules();
+      const seeded = await this.api.seedRules(false);
+      this.rules = seeded.rules;
     } catch (error) {
       this.readinessError = this.errorMessage(error);
     } finally {
