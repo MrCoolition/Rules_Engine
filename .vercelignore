@@ -1,0 +1,8 @@
+*.xlsx
+*.xls
+.env
+.env.*
+node_modules
+dist
+.angular
+.git
