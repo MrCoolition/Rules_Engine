@@ -1,0 +1,435 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import ExcelJS from 'exceljs';
+import {
+  buildRuleCatalog,
+  catalogSnapshot,
+  executeRow,
+  executeRows,
+  summarizeBatch
+} from './_shared/engine.js';
+import type { JsonValue, RouteManifest, RowExecutionResult, RuleRun, WorkflowRow } from './_shared/types.js';
+import { createWorkflowRow } from './_shared/normalize.js';
+import { DEFAULT_DAF_FILE, DEFAULT_SOURCE_FILE, loadWorkbookFile, parseDafWorkbook, parseSourceWorkbook, workbookExists } from './_shared/workbooks.js';
+import { getStore, newId } from './_shared/store.js';
+import { hasDatabaseUrl } from './_shared/db.js';
+
+const manifest: RouteManifest = {
+  frontendRoutes: [
+    { path: '/', label: 'Command Center', purpose: 'KPIs, recent batches, and next operational actions.' },
+    { path: '/upload', label: 'Upload & Ingest', purpose: 'Import the DAF workbook and upload/source PRF/SORF/SRF workbooks.' },
+    { path: '/execute', label: 'Execution Console', purpose: 'Run approved executable rules against selected batches.' },
+    { path: '/workbench', label: 'Analyst Workbench', purpose: 'Search, filter, review, and edit workflow row decisions.' },
+    { path: '/reports', label: 'Outcome Reporting', purpose: 'Rollups, coverage, and CSV/XLSX export.' },
+    { path: '/rules', label: 'Rule Catalog', purpose: 'Browse imported DAF rules, variants, status, and automation level.' },
+    { path: '/settings', label: 'Settings', purpose: 'Environment health, schema bootstrap, and API route manifest.' }
+  ],
+  apiRoutes: [
+    { method: 'GET', path: '/api/health', purpose: 'Environment, database, and seed workbook status.' },
+    { method: 'GET', path: '/api/routes', purpose: 'Frontend and API route manifest.' },
+    { method: 'POST', path: '/api/bootstrap', purpose: 'Create Neon schema tables and indexes.' },
+    { method: 'GET', path: '/api/batches', purpose: 'List source batches.' },
+    { method: 'POST', path: '/api/batches/upload', purpose: 'Upload a PRF/SORF/SRF workbook as base64 JSON.' },
+    { method: 'POST', path: '/api/batches/sample', purpose: 'Ingest the standard PRF/SORF/SRF workbook from the workspace.' },
+    { method: 'GET', path: '/api/batches/:batchId', purpose: 'Batch metadata and KPI summary.' },
+    { method: 'DELETE', path: '/api/batches/:batchId', purpose: 'Archive a batch.' },
+    { method: 'GET', path: '/api/batches/:batchId/rows', purpose: 'Paginated/filterable workflow rows.' },
+    { method: 'GET', path: '/api/batches/:batchId/summary', purpose: 'Batch KPI and chart-ready summary.' },
+    { method: 'POST', path: '/api/batches/:batchId/export', purpose: 'Export CSV or XLSX outcomes.' },
+    { method: 'PATCH', path: '/api/rows/:rowId', purpose: 'Patch analyst-editable row fields with audit.' },
+    { method: 'GET', path: '/api/rules', purpose: 'List rule definitions and latest variants.' },
+    { method: 'POST', path: '/api/rules/import-daf', purpose: 'Import uploaded DAF workbook or the workspace default DAF workbook.' },
+    { method: 'GET', path: '/api/rules/:ruleId', purpose: 'Rule details, version, and variants.' },
+    { method: 'POST', path: '/api/rules/simulate', purpose: 'Run rules against one row without persisting.' },
+    { method: 'POST', path: '/api/runs', purpose: 'Execute approved rule variants against a batch.' },
+    { method: 'GET', path: '/api/runs/:runId', purpose: 'Run metadata and counts.' },
+    { method: 'GET', path: '/api/runs/:runId/results', purpose: 'Row-level before/after execution trace results.' }
+  ]
+};
+
+export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
+  setCommonHeaders(res);
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+
+  const path = getPath(req);
+  const store = getStore();
+
+  try {
+    if (req.method === 'GET' && pathEquals(path, 'health')) {
+      sendJson(res, 200, {
+        ok: true,
+        store: store.kind,
+        databaseConfigured: hasDatabaseUrl(),
+        defaultDafWorkbook: await workbookExists(DEFAULT_DAF_FILE),
+        defaultSourceWorkbook: await workbookExists(DEFAULT_SOURCE_FILE),
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+
+    if (req.method === 'GET' && pathEquals(path, 'routes')) {
+      sendJson(res, 200, manifest);
+      return;
+    }
+
+    if (req.method === 'POST' && pathEquals(path, 'bootstrap')) {
+      const result = await store.bootstrap();
+      await store.audit('schema.bootstrap', 'system', null, result);
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (req.method === 'GET' && pathEquals(path, 'batches')) {
+      sendJson(res, 200, { batches: await store.listBatches() });
+      return;
+    }
+
+    if (req.method === 'POST' && pathEquals(path, 'batches', 'upload')) {
+      const body = await readJson(req);
+      const fileName = stringBody(body['fileName']) || 'upload.xlsx';
+      const fileBase64 = stringBody(body['fileBase64']);
+      if (!fileBase64) throw httpError(400, 'fileBase64 is required.');
+      const parsed = await parseSourceWorkbook(fileName, base64ToBuffer(fileBase64));
+      const batch = await store.createBatch(parsed, {
+        name: stringBody(body['name']) || fileName,
+        reportingDate: stringBody(body['reportingDate']) || today(),
+        sourceKind: 'upload'
+      });
+      await store.audit('batch.uploaded', 'source_batch', batch.id, { fileName, rowCount: parsed.rows.length });
+      sendJson(res, 200, { batchId: batch.id, rowCount: batch.rowCount, sourceSheetName: batch.sourceSheetName, columns: parsed.columns, warnings: parsed.warnings });
+      return;
+    }
+
+    if (req.method === 'POST' && pathEquals(path, 'batches', 'sample')) {
+      const body = await readJson(req, true);
+      const buffer = await loadWorkbookFile(DEFAULT_SOURCE_FILE);
+      const parsed = await parseSourceWorkbook(DEFAULT_SOURCE_FILE, buffer);
+      const batch = await store.createBatch(parsed, {
+        name: stringBody(body['name']) || 'Standard PRF/SORF/SRF sample',
+        reportingDate: stringBody(body['reportingDate']) || today(),
+        sourceKind: 'sample'
+      });
+      sendJson(res, 200, { batchId: batch.id, rowCount: batch.rowCount, sourceSheetName: batch.sourceSheetName, columns: parsed.columns, warnings: parsed.warnings });
+      return;
+    }
+
+    if (path[0] === 'batches' && path[1] && path.length === 2 && req.method === 'GET') {
+      const batch = await store.getBatch(path[1]);
+      if (!batch) throw httpError(404, 'Batch not found.');
+      sendJson(res, 200, { batch });
+      return;
+    }
+
+    if (path[0] === 'batches' && path[1] && path.length === 2 && req.method === 'DELETE') {
+      sendJson(res, 200, { archived: await store.archiveBatch(path[1]) });
+      return;
+    }
+
+    if (path[0] === 'batches' && path[1] && path[2] === 'rows' && req.method === 'GET') {
+      sendJson(res, 200, await store.listRows(path[1], getUrl(req).searchParams));
+      return;
+    }
+
+    if (path[0] === 'batches' && path[1] && path[2] === 'summary' && req.method === 'GET') {
+      const rows = await store.getRows(path[1]);
+      sendJson(res, 200, summarizeBatch(rows));
+      return;
+    }
+
+    if (path[0] === 'batches' && path[1] && path[2] === 'export' && req.method === 'POST') {
+      const body = await readJson(req, true);
+      const format = (stringBody(body['format']) || 'csv').toLowerCase();
+      const rows = await store.getRows(path[1]);
+      if (format === 'xlsx') {
+        const buffer = await exportXlsx(rows);
+        sendFile(res, 200, buffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', `rules-engine-${path[1]}.xlsx`);
+      } else {
+        const csv = exportCsv(rows);
+        sendFile(res, 200, Buffer.from(csv, 'utf8'), 'text/csv; charset=utf-8', `rules-engine-${path[1]}.csv`);
+      }
+      await store.audit('batch.exported', 'source_batch', path[1], { format });
+      return;
+    }
+
+    if (path[0] === 'rows' && path[1] && req.method === 'PATCH') {
+      const row = await store.updateRow(path[1], await readJson(req));
+      if (!row) throw httpError(404, 'Row not found.');
+      sendJson(res, 200, { row });
+      return;
+    }
+
+    if (req.method === 'GET' && pathEquals(path, 'rules')) {
+      sendJson(res, 200, { rules: await store.listRules() });
+      return;
+    }
+
+    if (req.method === 'POST' && pathEquals(path, 'rules', 'import-daf')) {
+      const body = await readJson(req, true);
+      const fileName = stringBody(body['fileName']) || DEFAULT_DAF_FILE;
+      const buffer = body['fileBase64'] ? base64ToBuffer(stringBody(body['fileBase64'])) : await loadWorkbookFile(DEFAULT_DAF_FILE);
+      const parsed = await parseDafWorkbook(fileName, buffer);
+      const { rules, report } = buildRuleCatalog(parsed);
+      await store.replaceRuleCatalog(rules);
+      sendJson(res, 200, { report, rules });
+      return;
+    }
+
+    if (path[0] === 'rules' && path[1] && path.length === 2 && req.method === 'GET') {
+      const rule = await store.getRule(path[1]);
+      if (!rule) throw httpError(404, 'Rule not found.');
+      sendJson(res, 200, { rule });
+      return;
+    }
+
+    if (req.method === 'POST' && pathEquals(path, 'rules', 'simulate')) {
+      const body = await readJson(req);
+      const rules = await store.listRules();
+      let row: WorkflowRow | null = null;
+      if (body['batchId'] && body['rowId']) {
+        const rows = await store.getRows(stringBody(body['batchId']));
+        row = rows.find((item) => item.id === body['rowId']) ?? null;
+      }
+      if (!row && body['rawRow'] && typeof body['rawRow'] === 'object') {
+        row = createWorkflowRow('simulation', body['rawRow'] as Record<string, JsonValue>, 1, new Date().toISOString(), newId);
+      }
+      if (!row) throw httpError(400, 'Provide batchId + rowId or rawRow.');
+      const variants = rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved');
+      sendJson(res, 200, { before: row, after: executeRow(row, variants) });
+      return;
+    }
+
+    if (req.method === 'POST' && pathEquals(path, 'runs')) {
+      const body = await readJson(req);
+      const batchId = stringBody(body['batchId']);
+      if (!batchId) throw httpError(400, 'batchId is required.');
+      const rowIds = Array.isArray(body['rowIds']) ? body['rowIds'].map(String) : undefined;
+      const dryRun = Boolean(body['dryRun']);
+      const beforeRows = await store.getRows(batchId);
+      const rules = await store.listRules();
+      const executed = executeRows(beforeRows, rules, rowIds);
+      const run = createRuleRun(batchId, stringBody(body['mode']) || 'full_batch', beforeRows.length, executed.changedCount, executed.reviewCount, catalogSnapshot(rules));
+      const results = createResults(run.id, beforeRows, executed.rows, rowIds);
+      if (!dryRun) await store.createRun(run, results, executed.rows);
+      sendJson(res, 200, { run, results: results.slice(0, 50), dryRun });
+      return;
+    }
+
+    if (path[0] === 'runs' && path[1] && path.length === 2 && req.method === 'GET') {
+      const run = await store.getRun(path[1]);
+      if (!run) throw httpError(404, 'Run not found.');
+      sendJson(res, 200, { run });
+      return;
+    }
+
+    if (path[0] === 'runs' && path[1] && path[2] === 'results' && req.method === 'GET') {
+      sendJson(res, 200, { results: await store.listRunResults(path[1]) });
+      return;
+    }
+
+    throw httpError(404, `No route for ${req.method} /api/${path.join('/')}`);
+  } catch (error) {
+    const status = typeof error === 'object' && error && 'statusCode' in error ? Number((error as { statusCode: number }).statusCode) : 500;
+    const message = error instanceof Error ? error.message : 'Unexpected error.';
+    sendJson(res, status, { ok: false, error: message });
+  }
+}
+
+function createRuleRun(
+  batchId: string,
+  mode: string,
+  inputRowCount: number,
+  changedRowCount: number,
+  reviewRowCount: number,
+  snapshot: RuleRun['ruleVersionSnapshot']
+): RuleRun {
+  const now = new Date().toISOString();
+  return {
+    id: newId(),
+    batchId,
+    status: 'completed',
+    runMode: mode === 'selected_rows' ? 'selected_rows' : 'full_batch',
+    ruleVersionSnapshot: snapshot,
+    inputRowCount,
+    changedRowCount,
+    reviewRowCount,
+    errorMessage: '',
+    startedAt: now,
+    completedAt: now
+  };
+}
+
+function createResults(runId: string, beforeRows: WorkflowRow[], afterRows: WorkflowRow[], rowIds?: string[]): RowExecutionResult[] {
+  const selected = rowIds?.length ? new Set(rowIds) : null;
+  const beforeById = new Map(beforeRows.map((row) => [row.id, row]));
+  return afterRows
+    .filter((row) => !selected || selected.has(row.id))
+    .filter((row) => JSON.stringify(decision(row)) !== JSON.stringify(decision(beforeById.get(row.id))) || row.executionTrace.length > 0)
+    .map((row) => {
+      const before = beforeById.get(row.id) ?? row;
+      return {
+        id: newId(),
+        runId,
+        workflowRowId: row.id,
+        beforeState: before,
+        afterState: row,
+        trace: row.executionTrace,
+        rulesApplied: row.executionTrace.map((trace) => trace.runtimeRuleId),
+        validations: row.validationStatus ? row.validationStatus.split(';').map((item) => item.trim()) : [],
+        createdAt: new Date().toISOString()
+      };
+    });
+}
+
+function decision(row?: WorkflowRow): Record<string, unknown> {
+  if (!row) return {};
+  return {
+    action: row.action,
+    ifInStockAction: row.ifInStockAction,
+    buysmartAction: row.buysmartAction,
+    needsReview: row.needsReview,
+    excluded: row.excluded,
+    outcome: row.outcomeReporting
+  };
+}
+
+async function exportXlsx(rows: WorkflowRow[]): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Rules Execution Engine';
+  const worksheet = workbook.addWorksheet('Outcomes');
+  const headers = exportHeaders();
+  worksheet.addRow(headers);
+  rows.forEach((row) => worksheet.addRow(headers.map((header) => exportValue(row, header))));
+  worksheet.getRow(1).font = { bold: true };
+  worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+  worksheet.columns.forEach((column) => {
+    column.width = Math.min(Math.max(String(column.header ?? '').length + 4, 14), 36);
+  });
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
+}
+
+function exportCsv(rows: WorkflowRow[]): string {
+  const headers = exportHeaders();
+  const lines = [headers.join(',')];
+  for (const row of rows) {
+    lines.push(headers.map((header) => csvCell(exportValue(row, header))).join(','));
+  }
+  return lines.join('\n');
+}
+
+function exportHeaders(): string[] {
+  return [
+    'Business',
+    'Type',
+    'Case#',
+    'Vendor',
+    'DIN',
+    'MIN',
+    'Description',
+    'ACTION',
+    'If In Stock: Action',
+    'Buysmart Action',
+    'Rule Applied',
+    'Needs Review',
+    'Validation Status',
+    'Excluded',
+    'Excluded Reason',
+    'Outcome Reporting',
+    'Analyst Notes'
+  ];
+}
+
+function exportValue(row: WorkflowRow, header: string): string | number | boolean | null {
+  const values: Record<string, string | number | boolean | null> = {
+    Business: row.business,
+    Type: row.requestType,
+    'Case#': row.caseNumber,
+    Vendor: row.vendor,
+    DIN: row.din,
+    MIN: row.min,
+    Description: row.description,
+    ACTION: row.action,
+    'If In Stock: Action': row.ifInStockAction,
+    'Buysmart Action': row.buysmartAction,
+    'Rule Applied': row.ruleApplied,
+    'Needs Review': row.needsReview,
+    'Validation Status': row.validationStatus,
+    Excluded: row.excluded,
+    'Excluded Reason': row.excludedReason,
+    'Outcome Reporting': row.outcomeReporting,
+    'Analyst Notes': row.analystNotes
+  };
+  return values[header] ?? '';
+}
+
+function csvCell(value: string | number | boolean | null): string {
+  const text = String(value ?? '');
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function getPath(req: VercelRequest): string[] {
+  const raw = req.query['path'];
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw === 'string') return raw.split('/').filter(Boolean);
+  return [];
+}
+
+function pathEquals(path: string[], ...parts: string[]): boolean {
+  return path.length === parts.length && parts.every((part, index) => path[index] === part);
+}
+
+function getUrl(req: VercelRequest): URL {
+  const host = req.headers.host ?? 'localhost';
+  return new URL(req.url ?? '/', `http://${host}`);
+}
+
+async function readJson(req: VercelRequest, optional = false): Promise<Record<string, unknown>> {
+  if (req.body && typeof req.body === 'object') return req.body as Record<string, unknown>;
+  if (typeof req.body === 'string' && req.body.trim()) return JSON.parse(req.body) as Record<string, unknown>;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  const raw = Buffer.concat(chunks).toString('utf8').trim();
+  if (!raw && optional) return {};
+  if (!raw) throw httpError(400, 'JSON body is required.');
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function base64ToBuffer(value: string): Buffer {
+  const clean = value.includes(',') ? value.split(',').pop() ?? '' : value;
+  return Buffer.from(clean, 'base64');
+}
+
+function stringBody(value: unknown): string {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function sendJson(res: VercelResponse, status: number, payload: unknown): void {
+  res.status(status).json(payload);
+}
+
+function sendFile(res: VercelResponse, status: number, body: Buffer, contentType: string, fileName: string): void {
+  res.setHeader('content-type', contentType);
+  res.setHeader('content-disposition', `attachment; filename="${fileName}"`);
+  res.status(status).send(body);
+}
+
+function setCommonHeaders(res: VercelResponse): void {
+  res.setHeader('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  res.setHeader('access-control-allow-headers', 'content-type');
+  res.setHeader('x-rules-engine', 'analyst-command-center');
+}
+
+function httpError(statusCode: number, message: string): Error & { statusCode: number } {
+  const error = new Error(message) as Error & { statusCode: number };
+  error.statusCode = statusCode;
+  return error;
+}

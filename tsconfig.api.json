@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": [
+      "node"
+    ],
+    "outDir": "./dist/api-check"
+  },
+  "include": [
+    "api/**/*.ts",
+    "drizzle.config.ts"
+  ]
+}

@@ -1,0 +1,23 @@
+<div class="app-shell">
+  <aside class="side-rail">
+    <a class="brand" routerLink="/">
+      <span class="brand-mark">RE</span>
+      <span>
+        <strong>Rules Engine</strong>
+        <small>Analyst Command Center</small>
+      </span>
+    </a>
+
+    <nav>
+      @for (item of nav; track item.path) {
+        <a [routerLink]="item.path" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: item.path === '/' }">
+          {{ item.label }}
+        </a>
+      }
+    </nav>
+  </aside>
+
+  <main class="main">
+    <router-outlet />
+  </main>
+</div>

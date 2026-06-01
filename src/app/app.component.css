@@ -1,0 +1,90 @@
+.app-shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.side-rail {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 1.1rem;
+  background: #101827;
+  color: white;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3.2rem;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 2.45rem;
+  height: 2.45rem;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #2563eb, #0f9f92);
+  font-weight: 900;
+}
+
+.brand strong,
+.brand small {
+  display: block;
+}
+
+.brand small {
+  color: #aab6c8;
+  margin-top: 0.12rem;
+}
+
+nav {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 1.4rem;
+}
+
+nav a {
+  padding: 0.75rem 0.8rem;
+  border-radius: 7px;
+  color: #d7deeb;
+  font-weight: 750;
+}
+
+nav a.active,
+nav a:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+}
+
+.main {
+  min-width: 0;
+  padding: 1.4rem;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .side-rail {
+    position: relative;
+    height: auto;
+  }
+
+  nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .main {
+    padding: 0.9rem;
+  }
+}
