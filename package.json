@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "packageManager": "npm@11.13.0",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "ng": "ng",
     "dev": "ng serve --host 0.0.0.0",
