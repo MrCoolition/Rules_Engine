@@ -10,11 +10,10 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 })
 export class AppComponent {
   nav = [
-    { path: '/', label: 'Command' },
-    { path: '/upload', label: 'Upload' },
-    { path: '/execute', label: 'Execute' },
-    { path: '/workbench', label: 'Workbench' },
-    { path: '/reports', label: 'Reports' },
+    { path: '/', label: 'Overview' },
+    { path: '/upload', label: 'Process PRF' },
+    { path: '/workbench', label: 'Review Rows' },
+    { path: '/reports', label: 'Buckets' },
     { path: '/rules', label: 'Rules' },
     { path: '/settings', label: 'Settings' }
   ];

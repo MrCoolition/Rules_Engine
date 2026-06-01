@@ -8,8 +8,8 @@ import { RuleCatalogComponent } from './pages/rule-catalog.component';
 import { SettingsComponent } from './pages/settings.component';
 
 export const routes: Routes = [
-  { path: '', component: CommandCenterComponent, title: 'Command Center' },
-  { path: 'upload', component: UploadIngestComponent, title: 'Upload & Ingest' },
+  { path: '', component: CommandCenterComponent, title: 'Compliance Rules' },
+  { path: 'upload', component: UploadIngestComponent, title: 'Process PRF' },
   { path: 'execute', component: ExecutionConsoleComponent, title: 'Execution Console' },
   { path: 'workbench', component: WorkbenchComponent, title: 'Analyst Workbench' },
   { path: 'reports', component: ReportsComponent, title: 'Outcome Reporting' },

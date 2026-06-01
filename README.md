@@ -1,6 +1,6 @@
 # Rules Execution Engine
 
-Angular 21 command center with Vercel Functions and Neon Postgres support.
+Angular 21 compliance rules processor with Vercel Functions and Neon Postgres support.
 
 ## Local setup
 
@@ -11,12 +11,12 @@ Angular 21 command center with Vercel Functions and Neon Postgres support.
 
 Without `DATABASE_URL`, the API runs in demo memory mode. With Neon, call `POST /api/bootstrap` once to create tables.
 
-The operational `.xlsx` workbooks are intentionally ignored for public GitHub safety. In production, import DAF and PRF/SORF/SRF workbooks through Upload & Ingest.
+The operational `.xlsx` workbooks are intentionally ignored for public GitHub safety. In production, DAF rules live in Neon and analysts upload only PRF/SORF/SRF workbooks through Process PRF.
 
 ## Primary app routes
 
-- `/` Command Center
-- `/upload` Upload & Ingest
+- `/` Compliance Rules overview
+- `/upload` Process PRF
 - `/execute` Execution Console
 - `/workbench` Analyst Workbench
 - `/reports` Outcome Reporting
@@ -51,4 +51,4 @@ Implemented endpoints:
 
 ## Vercel + Neon
 
-Set `DATABASE_URL` in Vercel project environment variables. The API also accepts common Vercel/Neon aliases: `POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`, and `NEON_DATABASE_URL`. After deploy, call `POST /api/bootstrap` once, then import DAF rules and ingest a workbook from the app.
+Set `DATABASE_URL` in Vercel project environment variables. The API also accepts common Vercel/Neon aliases: `POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`, and `NEON_DATABASE_URL`. After deploy, call `POST /api/bootstrap` once. DAF-derived rules should already be present in Neon before analysts process PRF/SORF/SRF workbooks.

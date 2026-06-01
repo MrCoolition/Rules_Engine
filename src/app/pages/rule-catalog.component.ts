@@ -11,9 +11,8 @@ import type { RuleDefinition } from '../models';
     <section class="page-title">
       <div>
         <p>Rule Catalog</p>
-        <h1>DAF logic as governed rules</h1>
+        <h1>Database-backed compliance rules</h1>
       </div>
-      <button class="button" (click)="importDefault()" [disabled]="busy">Import Workspace DAF</button>
     </section>
 
     <section class="panel catalog-tools">
@@ -163,7 +162,6 @@ export class RuleCatalogComponent implements OnInit {
   private readonly api = inject(ApiService);
   rules: RuleDefinition[] = [];
   filter = '';
-  busy = false;
   message = '';
 
   get filteredRules(): RuleDefinition[] {
@@ -188,14 +186,4 @@ export class RuleCatalogComponent implements OnInit {
     this.rules = await this.api.listRules();
   }
 
-  async importDefault(): Promise<void> {
-    this.busy = true;
-    try {
-      const result = await this.api.importDefaultDaf();
-      this.rules = result.rules;
-      this.message = JSON.stringify(result.report, null, 2);
-    } finally {
-      this.busy = false;
-    }
-  }
 }

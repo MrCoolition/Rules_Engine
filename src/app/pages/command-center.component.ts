@@ -10,12 +10,11 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
   template: `
     <section class="page-head">
       <div>
-        <p class="eyebrow">Analyst command center</p>
-        <h1>Daily rules execution</h1>
+        <p class="eyebrow">Compliance Rules</p>
+        <h1>PRF/SORF/SRF processing</h1>
       </div>
       <div class="toolbar">
-        <button class="button ghost" (click)="importDaf()" [disabled]="busy || !health?.defaultDafWorkbook">{{ busyLabel || 'Import DAF' }}</button>
-        <button class="button" (click)="ingestSample()" [disabled]="busy || !health?.defaultSourceWorkbook">Ingest Standard File</button>
+        <a class="button" routerLink="/upload">Process Workbook</a>
       </div>
     </section>
 
@@ -25,8 +24,8 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
 
     <section class="kpi-grid">
       <article class="panel kpi">
-        <small>Storage</small>
-        <strong>{{ health?.store || 'checking' }}</strong>
+        <small>Database</small>
+        <strong>{{ health?.databaseConfigured ? 'Neon' : 'Missing' }}</strong>
       </article>
       <article class="panel kpi">
         <small>Batches</small>
@@ -46,11 +45,11 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
       <article class="panel card-pad">
         <div class="section-title">
           <h2>Latest Batches</h2>
-          <a routerLink="/upload">Upload</a>
+          <a routerLink="/upload">Process</a>
         </div>
 
         @if (!batches.length) {
-          <div class="empty">No batches yet. Ingest the standard file to create the first workflow.</div>
+          <div class="empty">No batches yet. Upload a PRF/SORF/SRF workbook to create the first workflow.</div>
         } @else {
           <div class="table-scroll">
             <table class="data-table">
@@ -79,21 +78,21 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
 
       <article class="panel card-pad">
         <div class="section-title">
-          <h2>Run Readiness</h2>
-          <a routerLink="/settings">Health</a>
+          <h2>Rules Readiness</h2>
+          <a routerLink="/rules">Catalog</a>
         </div>
         <div class="readiness">
           <div>
             <span [class]="health?.databaseConfigured ? 'tag good' : 'tag warn'">{{ health?.databaseConfigured ? 'Neon connected' : 'Demo memory' }}</span>
-            <p>Neon is used when <code>DATABASE_URL</code> is present. Otherwise, the API stays usable in local memory mode.</p>
+            <p>Rules and workflow rows persist in Neon when the database URL is configured.</p>
           </div>
           <div>
-            <span [class]="health?.defaultDafWorkbook ? 'tag good' : 'tag bad'">DAF workbook</span>
-            <p>Default catalog import uses the local workbook. On Vercel, upload DAF from the intake screen.</p>
+            <span [class]="rules.length ? 'tag good' : 'tag bad'">Rules loaded</span>
+            <p>{{ rules.length }} rule definitions are available from the database.</p>
           </div>
           <div>
-            <span [class]="health?.defaultSourceWorkbook ? 'tag good' : 'tag bad'">Standard file</span>
-            <p>Standard PRF/SORF/SRF ingestion uses the local workbook. On Vercel, upload the daily workbook.</p>
+            <span [class]="executableVariantCount ? 'tag good' : 'tag bad'">Executable variants</span>
+            <p>{{ executableVariantCount }} variants are enabled for batch execution.</p>
           </div>
         </div>
       </article>
@@ -188,8 +187,6 @@ export class CommandCenterComponent implements OnInit {
   health: HealthResponse | null = null;
   batches: SourceBatch[] = [];
   rules: RuleDefinition[] = [];
-  busy = false;
-  busyLabel = '';
   message = '';
 
   get executableVariantCount(): number {
@@ -204,27 +201,4 @@ export class CommandCenterComponent implements OnInit {
     [this.health, this.batches, this.rules] = await Promise.all([this.api.health(), this.api.listBatches(), this.api.listRules()]);
   }
 
-  async importDaf(): Promise<void> {
-    this.busy = true;
-    this.busyLabel = 'Importing...';
-    try {
-      const result = await this.api.importDefaultDaf();
-      this.message = `Imported ${result.rules.length} DAF rules.`;
-      await this.refresh();
-    } finally {
-      this.busy = false;
-      this.busyLabel = '';
-    }
-  }
-
-  async ingestSample(): Promise<void> {
-    this.busy = true;
-    try {
-      const result = await this.api.ingestSample();
-      this.message = `Created batch ${result.batchId} with ${result.rowCount} rows.`;
-      await this.refresh();
-    } finally {
-      this.busy = false;
-    }
-  }
 }

@@ -15,21 +15,21 @@ import { hasDatabaseUrl } from './_shared/db.js';
 
 const manifest: RouteManifest = {
   frontendRoutes: [
-    { path: '/', label: 'Command Center', purpose: 'KPIs, recent batches, and next operational actions.' },
-    { path: '/upload', label: 'Upload & Ingest', purpose: 'Import the DAF workbook and upload/source PRF/SORF/SRF workbooks.' },
-    { path: '/execute', label: 'Execution Console', purpose: 'Run approved executable rules against selected batches.' },
+    { path: '/', label: 'Compliance Rules', purpose: 'Rules readiness, recent batches, and processing entry point.' },
+    { path: '/upload', label: 'Process PRF', purpose: 'Upload a PRF/SORF/SRF workbook, run DB-backed rules, and show result buckets.' },
+    { path: '/execute', label: 'Execution Console', purpose: 'Optional run console for selected batches.' },
     { path: '/workbench', label: 'Analyst Workbench', purpose: 'Search, filter, review, and edit workflow row decisions.' },
     { path: '/reports', label: 'Outcome Reporting', purpose: 'Rollups, coverage, and CSV/XLSX export.' },
     { path: '/rules', label: 'Rule Catalog', purpose: 'Browse imported DAF rules, variants, status, and automation level.' },
     { path: '/settings', label: 'Settings', purpose: 'Environment health, schema bootstrap, and API route manifest.' }
   ],
   apiRoutes: [
-    { method: 'GET', path: '/api/health', purpose: 'Environment, database, and seed workbook status.' },
+    { method: 'GET', path: '/api/health', purpose: 'Environment and database status.' },
     { method: 'GET', path: '/api/routes', purpose: 'Frontend and API route manifest.' },
     { method: 'POST', path: '/api/bootstrap', purpose: 'Create Neon schema tables and indexes.' },
     { method: 'GET', path: '/api/batches', purpose: 'List source batches.' },
     { method: 'POST', path: '/api/batches/upload', purpose: 'Upload a PRF/SORF/SRF workbook as base64 JSON.' },
-    { method: 'POST', path: '/api/batches/sample', purpose: 'Ingest the standard PRF/SORF/SRF workbook from the workspace.' },
+    { method: 'POST', path: '/api/batches/sample', purpose: 'Local-only sample ingestion when a workspace workbook exists.' },
     { method: 'GET', path: '/api/batches/:batchId', purpose: 'Batch metadata and KPI summary.' },
     { method: 'DELETE', path: '/api/batches/:batchId', purpose: 'Archive a batch.' },
     { method: 'GET', path: '/api/batches/:batchId/rows', purpose: 'Paginated/filterable workflow rows.' },
@@ -37,7 +37,7 @@ const manifest: RouteManifest = {
     { method: 'POST', path: '/api/batches/:batchId/export', purpose: 'Export CSV or XLSX outcomes.' },
     { method: 'PATCH', path: '/api/rows/:rowId', purpose: 'Patch analyst-editable row fields with audit.' },
     { method: 'GET', path: '/api/rules', purpose: 'List rule definitions and latest variants.' },
-    { method: 'POST', path: '/api/rules/import-daf', purpose: 'Import uploaded DAF workbook or the workspace default DAF workbook.' },
+    { method: 'POST', path: '/api/rules/import-daf', purpose: 'Admin-only rule catalog import. Normal processing uses rules already in Neon.' },
     { method: 'GET', path: '/api/rules/:ruleId', purpose: 'Rule details, version, and variants.' },
     { method: 'POST', path: '/api/rules/:ruleId/versions', purpose: 'Create a draft version from the current rule.' },
     { method: 'PATCH', path: '/api/rules/versions/:versionId', purpose: 'Edit draft/ready version metadata and variants.' },
@@ -283,6 +283,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const dryRun = Boolean(body['dryRun']);
       const beforeRows = await store.getRows(batchId);
       const rules = await store.listRules();
+      const executableRuleCount = rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length;
+      if (executableRuleCount === 0) {
+        throw httpError(409, 'No approved executable rules are loaded in the database.');
+      }
       const executed = executeRows(beforeRows, rules, rowIds);
       const run = createRuleRun(batchId, stringBody(body['mode']) || 'full_batch', beforeRows.length, executed.changedCount, executed.reviewCount, catalogSnapshot(rules));
       const results = createResults(run.id, beforeRows, executed.rows, rowIds);
