@@ -516,7 +516,7 @@ function sendFile(res: VercelResponse, status: number, body: Buffer, contentType
 function setCommonHeaders(res: VercelResponse): void {
   res.setHeader('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS');
   res.setHeader('access-control-allow-headers', 'content-type');
-  res.setHeader('x-rules-engine', 'analyst-command-center');
+  res.setHeader('x-rules-engine', 'compliance-rules');
 }
 
 function httpError(statusCode: number, message: string): Error & { statusCode: number } {

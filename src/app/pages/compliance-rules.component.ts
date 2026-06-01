@@ -182,7 +182,7 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
     `
   ]
 })
-export class CommandCenterComponent implements OnInit {
+export class ComplianceRulesComponent implements OnInit {
   private readonly api = inject(ApiService);
   health: HealthResponse | null = null;
   batches: SourceBatch[] = [];
