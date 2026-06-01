@@ -51,4 +51,4 @@ Implemented endpoints:
 
 ## Vercel + Neon
 
-Set `DATABASE_URL` in Vercel project environment variables. The Neon integration can provide it automatically. After deploy, call `POST /api/bootstrap` once, then import DAF rules and ingest a workbook from the app.
+Set `DATABASE_URL` in Vercel project environment variables. The API also accepts common Vercel/Neon aliases: `POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`, and `NEON_DATABASE_URL`. After deploy, call `POST /api/bootstrap` once, then import DAF rules and ingest a workbook from the app.
