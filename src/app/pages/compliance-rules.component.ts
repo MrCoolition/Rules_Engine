@@ -28,7 +28,7 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
     <section class="kpi-grid">
       <article class="panel kpi">
         <small>Database</small>
-        <strong>{{ loading ? 'Checking' : health?.databaseConfigured ? 'Neon' : 'Missing' }}</strong>
+        <strong>{{ loading && !health ? 'Checking' : dbReady ? 'Neon' : 'Missing' }}</strong>
       </article>
       <article class="panel kpi">
         <small>Batches</small>
@@ -36,11 +36,11 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
       </article>
       <article class="panel kpi">
         <small>Rules</small>
-        <strong>{{ loading ? 'Checking' : rules.length }}</strong>
+        <strong>{{ loading && !health ? 'Checking' : ruleCount }}</strong>
       </article>
       <article class="panel kpi">
         <small>Executable</small>
-        <strong>{{ loading ? 'Checking' : executableVariantCount }}</strong>
+        <strong>{{ loading && !health ? 'Checking' : executableVariantCount }}</strong>
       </article>
     </section>
 
@@ -86,16 +86,16 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
         </div>
         <div class="readiness">
           <div>
-            <span [class]="health?.databaseConfigured ? 'tag good' : 'tag bad'">{{ health?.databaseConfigured ? 'Neon connected' : 'No database' }}</span>
-            <p>DATABASE_URL must be available in Vercel for persisted batches and rule execution.</p>
+            <span [class]="loading && !health ? 'tag info' : dbReady ? 'tag good' : 'tag bad'">{{ loading && !health ? 'Checking database' : dbReady ? 'Neon connected' : 'No database' }}</span>
+            <p>{{ dbReady ? 'DATABASE_URL is active for persisted batches and rule execution.' : 'DATABASE_URL must be available in Vercel for persisted batches and rule execution.' }}</p>
           </div>
           <div>
-            <span [class]="loading ? 'tag info' : rules.length ? 'tag good' : 'tag bad'">{{ loading ? 'Checking rules' : 'DAF rules seeded' }}</span>
-            <p>{{ loading ? 'Loading DB-backed rules.' : rules.length + ' rule definitions are loaded from the DB catalog.' }}</p>
+            <span [class]="loading && !health ? 'tag info' : ruleCount ? 'tag good' : 'tag bad'">{{ loading && !health ? 'Checking rules' : 'DAF rules seeded' }}</span>
+            <p>{{ loading && !health ? 'Loading DB-backed rules.' : ruleCount + ' rule definitions are loaded from the DB catalog.' }}</p>
           </div>
           <div>
-            <span [class]="loading ? 'tag info' : executableVariantCount ? 'tag good' : 'tag bad'">Executable variants</span>
-            <p>{{ loading ? 'Checking executable variants.' : executableVariantCount + ' approved variants can run against PRF rows.' }}</p>
+            <span [class]="loading && !health ? 'tag info' : executableVariantCount ? 'tag good' : 'tag bad'">Executable variants</span>
+            <p>{{ loading && !health ? 'Checking executable variants.' : executableVariantCount + ' approved variants can run against PRF rows.' }}</p>
           </div>
         </div>
       </article>
@@ -149,10 +149,20 @@ export class ComplianceRulesComponent implements OnInit {
   batches: SourceBatch[] = [];
   rules: RuleDefinition[] = [];
   loading = true;
+  catalogLoading = false;
   error = '';
 
+  get dbReady(): boolean {
+    return this.health?.databaseConfigured === true;
+  }
+
+  get ruleCount(): number {
+    return this.rules.length || this.health?.ruleCount || 0;
+  }
+
   get executableVariantCount(): number {
-    return this.rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length;
+    const fromRules = this.rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length;
+    return fromRules || this.health?.executableVariantCount || 0;
   }
 
   ngOnInit(): void {
@@ -164,13 +174,24 @@ export class ComplianceRulesComponent implements OnInit {
     this.error = '';
     try {
       this.health = await this.api.health();
-      const [batches, seeded] = await Promise.all([this.api.listBatches(), this.api.seedRules(false)]);
-      this.batches = batches;
-      this.rules = seeded.rules;
+      this.loading = false;
+      void this.loadCatalog();
+      this.batches = await this.api.listBatches();
     } catch (error) {
       this.error = this.errorMessage(error);
     } finally {
       this.loading = false;
+    }
+  }
+
+  private async loadCatalog(): Promise<void> {
+    this.catalogLoading = true;
+    try {
+      this.rules = await this.api.listRules();
+    } catch {
+      // Health already provides the readiness counts used by this screen.
+    } finally {
+      this.catalogLoading = false;
     }
   }
 

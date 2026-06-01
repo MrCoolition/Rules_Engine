@@ -15,7 +15,7 @@ import type { RuleDefinition } from '../models';
         <p class="page-copy">DAF logic is stored as database rules and used by the PRF/SORF/SRF engine.</p>
       </div>
       <div class="toolbar">
-        <button class="button secondary" (click)="syncRules()" [disabled]="busy">{{ busy ? 'Syncing' : 'Sync DB Rules' }}</button>
+        <button class="button secondary" (click)="syncRules()" [disabled]="busy">{{ busy ? 'Repairing' : 'Repair DB Rules' }}</button>
       </div>
     </section>
 
@@ -65,7 +65,12 @@ import type { RuleDefinition } from '../models';
             <div>
               <span [class]="rule.automationLevel === 'alpha' ? 'tag good' : rule.automationLevel === 'guided' ? 'tag warn' : 'tag info'">{{ rule.automationLevel }}</span>
             </div>
-            <div class="logic-cell">{{ firstDescription(rule) }}</div>
+            <div class="logic-cell">
+              <b>Filter</b>
+              <span>{{ fieldFilter(rule) }}</span>
+              <b>Aggregate</b>
+              <span>{{ aggregateLogic(rule) }}</span>
+            </div>
           </div>
         } @empty {
           <div class="empty">No rules matched that filter.</div>
@@ -149,6 +154,22 @@ import type { RuleDefinition } from '../models';
         line-height: 1.35;
       }
 
+      .logic-cell b,
+      .logic-cell span {
+        display: block;
+      }
+
+      .logic-cell b {
+        color: var(--ink);
+        font-size: 0.72rem;
+        margin-top: 0.15rem;
+        text-transform: uppercase;
+      }
+
+      .logic-cell span {
+        margin-bottom: 0.35rem;
+      }
+
       @media (max-width: 1100px) {
         .rules-table {
           overflow-x: auto;
@@ -192,9 +213,8 @@ export class RuleCatalogComponent implements OnInit {
     this.loading = true;
     this.error = '';
     try {
-      const result = await this.api.seedRules(false);
-      this.rules = result.rules;
-      this.message = result.seeded ? `Loaded ${result.rules.length} DAF-derived rules into the database.` : '';
+      this.rules = await this.api.listRules();
+      this.message = '';
     } catch (error) {
       this.error = this.errorMessage(error);
     } finally {
@@ -209,7 +229,7 @@ export class RuleCatalogComponent implements OnInit {
     try {
       const result = await this.api.seedRules(true);
       this.rules = result.rules;
-      this.message = `Synced ${result.rules.length} DAF-derived rules into the database.`;
+      this.message = `Repaired ${result.rules.length} DAF-derived rules in the database.`;
     } catch (error) {
       this.error = this.errorMessage(error);
     } finally {
@@ -222,8 +242,12 @@ export class RuleCatalogComponent implements OnInit {
     return rule.variants.filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length;
   }
 
-  firstDescription(rule: RuleDefinition): string {
-    return rule.variants[0]?.description || rule.name;
+  fieldFilter(rule: RuleDefinition): string {
+    return rule.variants[0]?.source?.compiledLogic?.fieldFilterLogic || rule.variants[0]?.source?.fieldFilterLogic || rule.variants[0]?.description || rule.name;
+  }
+
+  aggregateLogic(rule: RuleDefinition): string {
+    return rule.variants[0]?.source?.compiledLogic?.aggregateLogic || rule.variants[0]?.source?.aggregateLogic || 'No aggregate action';
   }
 
   private errorMessage(error: unknown): string {

@@ -54,6 +54,16 @@ export interface RuleAction {
 export type AutomationLevel = 'alpha' | 'guided' | 'manual' | 'future';
 export type RuleVersionStatus = 'draft' | 'ready' | 'approved' | 'disabled' | 'archived';
 
+export interface CompiledRuleLogic {
+  compilerVersion: string;
+  fieldFilterLogic: string;
+  aggregateLogic: string;
+  predicateJson: Predicate | null;
+  actionJson: RuleAction[] | null;
+  executable: boolean;
+  warnings: string[];
+}
+
 export interface DafLogicRow {
   ruleId: string;
   ruleGroup: string;
@@ -69,6 +79,10 @@ export interface DafLogicRow {
   discoveryReference: string;
   notes: string;
   sourceRowNumber: number;
+  fieldFilterLogic?: string;
+  aggregateLogic?: string;
+  logic?: string;
+  compiledLogic?: CompiledRuleLogic;
 }
 
 export interface RuleVariant {

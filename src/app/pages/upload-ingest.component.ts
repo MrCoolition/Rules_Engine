@@ -16,11 +16,11 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
         <p class="page-copy">Upload the standard PRF/SORF/SRF file. The engine uses DAF-derived rules seeded in Neon and returns bucketed outcomes.</p>
       </div>
       <div class="status-strip">
-        @if (loadingReadiness) {
+        @if (loadingReadiness && !health) {
           <span class="tag info">Checking</span>
         } @else {
           <span [class]="dbReady ? 'tag good' : 'tag bad'">{{ dbReady ? 'Neon connected' : 'No database' }}</span>
-          <span [class]="rulesReady ? 'tag good' : 'tag bad'">{{ rules.length }} rules</span>
+          <span [class]="rulesReady ? 'tag good' : 'tag bad'">{{ ruleCount }} rules</span>
           <span [class]="executableVariantCount ? 'tag good' : 'tag bad'">{{ executableVariantCount }} executable</span>
         }
       </div>
@@ -48,7 +48,7 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
           </label>
 
           <div class="actions">
-            <button class="button" (click)="processWorkbook()" [disabled]="busy || loadingReadiness || !sourceFile || !rulesReady || !dbReady">
+            <button class="button" (click)="processWorkbook()" [disabled]="busy || loadingReadiness || !sourceFile || !readyForProcessing">
               {{ busy ? busyLabel : 'Process Workbook' }}
             </button>
             @if (latestBatchId) {
@@ -62,25 +62,27 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
           <h2>Engine</h2>
           <div class="engine-row">
             <span>Database</span>
-            <strong>{{ loadingReadiness ? 'Checking' : dbReady ? 'Neon' : 'Missing' }}</strong>
+            <strong>{{ loadingReadiness && !health ? 'Checking' : dbReady ? 'Neon' : 'Missing' }}</strong>
           </div>
           <div class="engine-row">
             <span>Rule catalog</span>
-            <strong>{{ loadingReadiness ? 'Checking' : rulesReady ? 'Ready' : 'Empty' }}</strong>
+            <strong>{{ loadingReadiness && !health ? 'Checking' : rulesReady ? 'Ready' : 'Empty' }}</strong>
           </div>
           <div class="engine-row">
             <span>Rule source</span>
             <strong>DAF seed</strong>
           </div>
 
-          @if (loadingReadiness) {
+          @if (loadingReadiness && !health) {
             <div class="alert info">Checking Neon and seeded rules.</div>
           } @else if (readinessError) {
             <div class="alert bad">{{ readinessError }}</div>
           } @else if (!dbReady) {
             <div class="alert bad">DATABASE_URL is not visible to this deployment.</div>
           } @else if (!rulesReady) {
-            <div class="alert bad">No executable rules are available. Open Rules and sync the DB catalog.</div>
+            <div class="alert bad">No executable DB rules are available. The API will repair the seeded catalog on the next health check.</div>
+          } @else if (catalogLoading) {
+            <div class="alert good">Ready to process. Loading catalog details in the background.</div>
           } @else {
             <div class="alert good">Ready to process against {{ executableVariantCount }} executable rules.</div>
           }
@@ -285,6 +287,7 @@ export class UploadIngestComponent implements OnInit {
   health: HealthResponse | null = null;
   rules: RuleDefinition[] = [];
   loadingReadiness = true;
+  catalogLoading = false;
   readinessError = '';
   busy = false;
   busyLabel = '';
@@ -301,11 +304,20 @@ export class UploadIngestComponent implements OnInit {
   }
 
   get executableVariantCount(): number {
-    return this.rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length;
+    const fromRules = this.rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length;
+    return fromRules || this.health?.executableVariantCount || 0;
+  }
+
+  get ruleCount(): number {
+    return this.rules.length || this.health?.ruleCount || 0;
   }
 
   get rulesReady(): boolean {
-    return this.rules.length > 0 && this.executableVariantCount > 0;
+    return this.ruleCount > 0 && this.executableVariantCount > 0;
+  }
+
+  get readyForProcessing(): boolean {
+    return this.dbReady && this.rulesReady;
   }
 
   ngOnInit(): void {
@@ -320,7 +332,7 @@ export class UploadIngestComponent implements OnInit {
   }
 
   async processWorkbook(): Promise<void> {
-    if (!this.sourceFile || !this.rulesReady || !this.dbReady) return;
+    if (!this.sourceFile || !this.readyForProcessing) return;
     this.busy = true;
     try {
       this.busyLabel = 'Uploading';
@@ -359,12 +371,22 @@ export class UploadIngestComponent implements OnInit {
     this.readinessError = '';
     try {
       this.health = await this.api.health();
-      const seeded = await this.api.seedRules(false);
-      this.rules = seeded.rules;
     } catch (error) {
       this.readinessError = this.errorMessage(error);
     } finally {
       this.loadingReadiness = false;
+    }
+    if (this.readyForProcessing) void this.loadCatalog();
+  }
+
+  private async loadCatalog(): Promise<void> {
+    this.catalogLoading = true;
+    try {
+      this.rules = await this.api.listRules();
+    } catch {
+      // Health already carries the counts needed for processing.
+    } finally {
+      this.catalogLoading = false;
     }
   }
 

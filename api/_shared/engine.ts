@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type {
   AutomationLevel,
   BatchSummary,
+  CompiledRuleLogic,
   DafLogicRow,
   JsonValue,
   NormalizedRow,
@@ -25,11 +26,18 @@ import {
   rowToSearchText
 } from './normalize.js';
 
+export const CATALOG_COMPILER_VERSION = '2026-06-01.daf-logic-v2';
+
 interface ExecutableSpec {
   predicate: Predicate;
   actions: RuleAction[];
   stopProcessing?: boolean;
   runtimeKind?: RuleVariant['runtimeKind'];
+}
+
+interface CompiledRuleResult {
+  spec: ExecutableSpec | null;
+  logic: CompiledRuleLogic;
 }
 
 interface ExecuteRowsResult {
@@ -64,7 +72,9 @@ export function buildRuleCatalog(parsed: ParsedDafWorkbook): {
       const definitionId = stableId(`definition:${ruleId}`);
       const versionId = stableId(`version:${ruleId}:1`);
       const variants: RuleVariant[] = rows.map((row, index) => {
-        const spec = executableSpecFor(row);
+        const compiled = compileRuleLogic(row);
+        const spec = compiled.spec;
+        const source = sourceWithCompiledLogic(row, compiled.logic);
         const automationLevel = automationLevelFor(row, spec);
         const status = statusFor(automationLevel);
         if (automationLevel === 'alpha') executableVariants += 1;
@@ -84,10 +94,10 @@ export function buildRuleCatalog(parsed: ParsedDafWorkbook): {
           stopProcessing: Boolean(spec?.stopProcessing),
           predicateJson: spec?.predicate ?? null,
           actionJson: spec?.actions ?? null,
-          description: row.decisionCriteria || row.setAction || row.ruleGroup,
+          description: compiled.logic.fieldFilterLogic || row.decisionCriteria || row.setAction || row.ruleGroup,
           automationLevel,
           status,
-          source: row
+          source
         };
       });
 
@@ -293,6 +303,49 @@ export function catalogSnapshot(rules: RuleDefinition[]): JsonValue {
       status: variant.status
     }))
   })) as JsonValue;
+}
+
+function compileRuleLogic(row: DafLogicRow): CompiledRuleResult {
+  const spec = executableSpecFor(row);
+  const fieldFilterLogic = row.fieldFilterLogic || row.decisionCriteria || `${row.business} ${row.requestTypes}`.trim();
+  const aggregateLogic = row.aggregateLogic || buildAggregateLogic(row);
+  const warnings = spec
+    ? []
+    : ['This DAF row references judgment, external lookup data, or downstream handling and is stored for guided/manual execution.'];
+
+  return {
+    spec,
+    logic: {
+      compilerVersion: CATALOG_COMPILER_VERSION,
+      fieldFilterLogic,
+      aggregateLogic,
+      predicateJson: spec?.predicate ?? null,
+      actionJson: spec?.actions ?? null,
+      executable: Boolean(spec),
+      warnings
+    }
+  };
+}
+
+function sourceWithCompiledLogic(row: DafLogicRow, compiledLogic: CompiledRuleLogic): DafLogicRow {
+  return {
+    ...row,
+    fieldFilterLogic: compiledLogic.fieldFilterLogic,
+    aggregateLogic: compiledLogic.aggregateLogic,
+    logic: [compiledLogic.fieldFilterLogic, compiledLogic.aggregateLogic].filter(Boolean).join(' => '),
+    compiledLogic
+  };
+}
+
+function buildAggregateLogic(row: DafLogicRow): string {
+  const parts = [
+    row.action ? `ACTION: ${row.action}` : '',
+    row.ifInStockAction ? `If In Stock: ${row.ifInStockAction}` : '',
+    row.buysmartAction ? `BuySmart Action: ${row.buysmartAction}` : '',
+    row.setAction ? `Set ACTION: ${row.setAction}` : '',
+    row.downstreamHandling ? `Downstream: ${row.downstreamHandling}` : ''
+  ].filter(Boolean);
+  return parts.join(' | ');
 }
 
 function executableSpecFor(row: DafLogicRow): ExecutableSpec | null {

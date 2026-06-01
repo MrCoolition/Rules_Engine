@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { DEFAULT_DAF_PARSED_WORKBOOK } from './_shared/daf-seed.js';
 import {
   buildRuleCatalog,
+  CATALOG_COMPILER_VERSION,
   catalogSnapshot,
   executeRow,
   executeRows,
@@ -355,7 +356,7 @@ async function getSeededRuleCatalog(
 ): Promise<{ rules: RuleDefinition[]; report: RuleImportReport; seeded: boolean }> {
   if (force) await store.bootstrap();
   const existingRules = await listRulesWithSchemaRepair(store);
-  if (!force && existingRules.length > 0) {
+  if (!force && existingRules.length > 0 && !catalogNeedsRefresh(existingRules)) {
     return { rules: existingRules, report: reportFromRules(existingRules), seeded: false };
   }
 
@@ -375,6 +376,13 @@ async function getSeededRuleCatalog(
     if (recoveredRules.length > 0) return { rules: recoveredRules, report: reportFromRules(recoveredRules), seeded: false };
     throw error;
   }
+}
+
+function catalogNeedsRefresh(rules: RuleDefinition[]): boolean {
+  const variants = rules.flatMap((rule) => rule.variants);
+  const bundledRuleCount = new Set(DEFAULT_DAF_PARSED_WORKBOOK.logicRows.map((row) => row.ruleId)).size;
+  if (rules.length !== bundledRuleCount || variants.length === 0) return true;
+  return variants.some((variant) => variant.source.compiledLogic?.compilerVersion !== CATALOG_COMPILER_VERSION);
 }
 
 async function listRulesWithSchemaRepair(store: ReturnType<typeof getStore>): Promise<RuleDefinition[]> {

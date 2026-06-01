@@ -79,6 +79,20 @@ export interface RuleDefinition {
     status: string;
     automationLevel: string;
     description: string;
+    predicateJson?: unknown;
+    actionJson?: unknown;
+    source?: {
+      fieldFilterLogic?: string;
+      aggregateLogic?: string;
+      logic?: string;
+      compiledLogic?: {
+        compilerVersion?: string;
+        fieldFilterLogic?: string;
+        aggregateLogic?: string;
+        executable?: boolean;
+        warnings?: string[];
+      };
+    };
   }[];
 }
 

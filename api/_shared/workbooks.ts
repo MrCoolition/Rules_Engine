@@ -89,12 +89,20 @@ export async function parseDafWorkbook(fileName: string, buffer: Buffer): Promis
     if (rowNumber <= headerRowNumber) return;
     const ruleId = cleanText(cellToJsonValue(row.getCell(headerIndex.get('Rule ID') ?? 1).value));
     if (!ruleId) return;
+    const decisionCriteria = getCell(row, headerIndex, 'Decision Criteria');
+    const aggregateLogic =
+      getCellAny(row, headerIndex, ['Aggregate Logic', 'AGGREGATE LOGIC']) ||
+      getCell(row, headerIndex, 'Set ACTION');
+    const fieldFilterLogic =
+      getCellAny(row, headerIndex, ['Field Filter Logic', 'FIELD FILTER LOGIC']) ||
+      decisionCriteria;
+    const explicitLogic = getCellAny(row, headerIndex, ['LOGIC', 'Logic']);
     logicRows.push({
       ruleId,
       ruleGroup: getCell(row, headerIndex, 'Rule Group'),
       business: getCell(row, headerIndex, 'Business'),
       requestTypes: getCell(row, headerIndex, 'Request Type (s)'),
-      decisionCriteria: getCell(row, headerIndex, 'Decision Criteria'),
+      decisionCriteria,
       action: getCell(row, headerIndex, 'Action'),
       ifInStockAction: getCell(row, headerIndex, 'If In-Stock Action'),
       buysmartAction: getCell(row, headerIndex, 'BuySmart Action'),
@@ -103,6 +111,9 @@ export async function parseDafWorkbook(fileName: string, buffer: Buffer): Promis
       downstreamHandling: getCell(row, headerIndex, 'Downstream Handling'),
       discoveryReference: getCell(row, headerIndex, 'Discovery Document Reference'),
       notes: getCell(row, headerIndex, 'Notes / Dependencies'),
+      fieldFilterLogic,
+      aggregateLogic,
+      logic: explicitLogic || [fieldFilterLogic, aggregateLogic].filter(Boolean).join(' => '),
       sourceRowNumber: rowNumber
     });
   });
@@ -125,6 +136,14 @@ export async function parseDafWorkbook(fileName: string, buffer: Buffer): Promis
 function getCell(row: ExcelJS.Row, headerIndex: Map<string, number>, header: string): string {
   const index = headerIndex.get(header);
   return index ? cleanText(cellToJsonValue(row.getCell(index).value)) : '';
+}
+
+function getCellAny(row: ExcelJS.Row, headerIndex: Map<string, number>, headers: string[]): string {
+  for (const header of headers) {
+    const value = getCell(row, headerIndex, header);
+    if (value) return value;
+  }
+  return '';
 }
 
 function readHeaderRow(worksheet: ExcelJS.Worksheet, rowNumber: number): string[] {
