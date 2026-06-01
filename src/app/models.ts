@@ -45,6 +45,7 @@ export interface WorkflowRow {
   validationStatus: string;
   excluded: boolean;
   excludedReason: string;
+  queueBucket: string;
   outcomeReporting: string;
   status: string;
 }
@@ -59,7 +60,29 @@ export interface BatchSummary {
   outcomeCounts: Record<string, number>;
   businessCounts: Record<string, number>;
   typeCounts: Record<string, number>;
+  bucketSummaries: ComplianceBucketSummary[];
   automationCoveragePct: number;
+}
+
+export interface ComplianceBucketSummary {
+  id: string;
+  label: string;
+  description: string;
+  tone: 'good' | 'warn' | 'bad' | 'info' | 'dark';
+  count: number;
+  reviewCount: number;
+  outcomeKeys: string[];
+  ruleIds: string[];
+  examples: {
+    rowId: string;
+    caseNumber: string;
+    vendor: string;
+    description: string;
+    action: string;
+    buysmartAction: string;
+    outcomeReporting: string;
+    ruleApplied: string;
+  }[];
 }
 
 export interface RuleDefinition {

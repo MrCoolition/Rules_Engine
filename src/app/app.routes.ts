@@ -12,7 +12,7 @@ export const routes: Routes = [
   { path: 'upload', component: UploadIngestComponent, title: 'Process PRF' },
   { path: 'execute', component: ExecutionConsoleComponent, title: 'Execution Console' },
   { path: 'workbench', component: WorkbenchComponent, title: 'Analyst Workbench' },
-  { path: 'reports', component: ReportsComponent, title: 'Outcome Reporting' },
+  { path: 'reports', component: ReportsComponent, title: 'Buckets' },
   { path: 'rules', component: RuleCatalogComponent, title: 'Rule Catalog' },
   { path: 'settings', component: SettingsComponent, title: 'Settings' },
   { path: '**', redirectTo: '' }

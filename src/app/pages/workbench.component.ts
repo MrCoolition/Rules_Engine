@@ -40,6 +40,15 @@ import type { SourceBatch, WorkflowRow } from '../models';
             <option value="false">Ready</option>
           </select>
         </label>
+        <label class="field">
+          <span>Bucket</span>
+          <select [(ngModel)]="bucket" (change)="loadRows()">
+            <option value="">All buckets</option>
+            @for (option of bucketOptions; track option.id) {
+              <option [value]="option.id">{{ option.label }}</option>
+            }
+          </select>
+        </label>
         <button class="button" (click)="loadRows()" [disabled]="!selectedBatchId">Apply</button>
       </div>
     </section>
@@ -57,6 +66,7 @@ import type { SourceBatch, WorkflowRow } from '../models';
                 <th>Vendor</th>
                 <th>Action</th>
                 <th>BuySmart</th>
+                <th>Bucket</th>
                 <th>Outcome</th>
               </tr>
             </thead>
@@ -69,6 +79,7 @@ import type { SourceBatch, WorkflowRow } from '../models';
                   <td>{{ row.vendor }}</td>
                   <td>{{ row.action || '-' }}</td>
                   <td><span [class]="tagClass(row.buysmartAction)">{{ row.buysmartAction || 'Blank' }}</span></td>
+                  <td>{{ row.queueBucket || '-' }}</td>
                   <td>{{ row.outcomeReporting }}</td>
                 </tr>
               }
@@ -243,8 +254,21 @@ export class WorkbenchComponent implements OnInit {
   selectedBatchId = '';
   search = '';
   needsReview = '';
+  bucket = '';
   selected: WorkflowRow | null = null;
   edit: Partial<WorkflowRow> = {};
+  readonly bucketOptions = [
+    { id: 'auto-approved', label: 'Auto Approved' },
+    { id: 'approved-1x', label: 'Approved 1X' },
+    { id: 'vendor-exclusions', label: 'Vendor Exclusions' },
+    { id: 'data-issues', label: 'Data Issues' },
+    { id: 'denied', label: 'Denied / Cannot Add' },
+    { id: 'use-right', label: 'Use Right / Conversion' },
+    { id: 'find-alt', label: 'Find Alt First' },
+    { id: 'cdm-review', label: 'CDM Review' },
+    { id: 'compliance-review', label: 'Compliance Review' },
+    { id: 'assigned-processing', label: 'Assigned for Processing' }
+  ];
 
   ngOnInit(): void {
     void this.init();
@@ -253,6 +277,7 @@ export class WorkbenchComponent implements OnInit {
   async init(): Promise<void> {
     this.batches = await this.api.listBatches();
     this.selectedBatchId = this.route.snapshot.queryParamMap.get('batchId') || this.batches[0]?.id || '';
+    this.bucket = this.route.snapshot.queryParamMap.get('bucket') || '';
     await this.loadRows();
   }
 
@@ -261,6 +286,7 @@ export class WorkbenchComponent implements OnInit {
     const result = await this.api.listRows(this.selectedBatchId, {
       pageSize: 75,
       search: this.search,
+      bucket: this.bucket || undefined,
       needsReview: this.needsReview || undefined
     });
     this.rows = result.rows;

@@ -100,9 +100,29 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
     }
 
     @if (summary) {
+      <section class="process-buckets">
+        @for (bucket of summary.bucketSummaries; track bucket.id) {
+          <article
+            class="panel quick-bucket"
+            [class.good]="bucket.tone === 'good'"
+            [class.warn]="bucket.tone === 'warn'"
+            [class.bad]="bucket.tone === 'bad'"
+            [class.info]="bucket.tone === 'info'"
+            [class.dark]="bucket.tone === 'dark'"
+          >
+            <div>
+              <h2>{{ bucket.label }}</h2>
+              <p>{{ bucket.description }}</p>
+            </div>
+            <strong>{{ bucket.count }}</strong>
+            <a [routerLink]="['/workbench']" [queryParams]="{ batchId: latestBatchId, bucket: bucket.id }">Review</a>
+          </article>
+        }
+      </section>
+
       <section class="split result-row">
         <article class="panel bucket-card">
-          <h2>Result Buckets</h2>
+          <h2>Outcome Mix</h2>
           @for (entry of entries(summary.outcomeCounts); track entry[0]) {
             <div class="bar-line">
               <span>{{ entry[0] }}</span>
@@ -219,9 +239,67 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
       }
 
       .result-kpis,
+      .process-buckets,
       .result-row,
       .output {
         margin-top: 0.9rem;
+      }
+
+      .process-buckets {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.75rem;
+      }
+
+      .quick-bucket {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 0.55rem 0.8rem;
+        padding: 0.9rem;
+        border-top: 4px solid var(--primary);
+      }
+
+      .quick-bucket.good {
+        border-top-color: var(--good);
+      }
+
+      .quick-bucket.warn {
+        border-top-color: var(--warn);
+      }
+
+      .quick-bucket.bad {
+        border-top-color: var(--danger);
+      }
+
+      .quick-bucket.info {
+        border-top-color: var(--accent-2);
+      }
+
+      .quick-bucket h2,
+      .quick-bucket p {
+        margin: 0;
+      }
+
+      .quick-bucket h2 {
+        font-size: 0.95rem;
+      }
+
+      .quick-bucket p {
+        margin-top: 0.24rem;
+        color: var(--muted);
+        line-height: 1.35;
+      }
+
+      .quick-bucket strong {
+        font-size: 1.8rem;
+        line-height: 1;
+      }
+
+      .quick-bucket a {
+        grid-column: 1 / -1;
+        justify-self: end;
+        color: var(--accent-2);
+        font-weight: 850;
       }
 
       .bucket-card {
@@ -268,7 +346,8 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
 
       @media (max-width: 900px) {
         .workflow-grid,
-        .form-grid {
+        .form-grid,
+        .process-buckets {
           grid-template-columns: 1fr;
         }
 

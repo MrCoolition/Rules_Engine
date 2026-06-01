@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { DEFAULT_DAF_PARSED_WORKBOOK } from './_shared/daf-seed.js';
 import {
   buildRuleCatalog,
+  bucketForRow,
   CATALOG_COMPILER_VERSION,
   catalogSnapshot,
   executeRow,
@@ -21,7 +22,7 @@ const manifest: RouteManifest = {
     { path: '/upload', label: 'Process PRF', purpose: 'Upload a PRF/SORF/SRF workbook, run DB-backed rules, and show result buckets.' },
     { path: '/execute', label: 'Execution Console', purpose: 'Optional run console for selected batches.' },
     { path: '/workbench', label: 'Analyst Workbench', purpose: 'Search, filter, review, and edit workflow row decisions.' },
-    { path: '/reports', label: 'Outcome Reporting', purpose: 'Rollups, coverage, and CSV/XLSX export.' },
+    { path: '/reports', label: 'Buckets', purpose: 'Compliance bucket rollups, drilldowns, coverage, and CSV/XLSX export.' },
     { path: '/rules', label: 'Rule Catalog', purpose: 'Browse and sync the DB-backed compliance rule catalog.' },
     { path: '/settings', label: 'Settings', purpose: 'Environment health, schema bootstrap, and API route manifest.' }
   ],
@@ -35,7 +36,7 @@ const manifest: RouteManifest = {
     { method: 'GET', path: '/api/batches/:batchId', purpose: 'Batch metadata and KPI summary.' },
     { method: 'DELETE', path: '/api/batches/:batchId', purpose: 'Archive a batch.' },
     { method: 'GET', path: '/api/batches/:batchId/rows', purpose: 'Paginated/filterable workflow rows.' },
-    { method: 'GET', path: '/api/batches/:batchId/summary', purpose: 'Batch KPI and chart-ready summary.' },
+    { method: 'GET', path: '/api/batches/:batchId/summary', purpose: 'Batch KPI, compliance buckets, and chart-ready summary.' },
     { method: 'POST', path: '/api/batches/:batchId/export', purpose: 'Export CSV or XLSX outcomes.' },
     { method: 'PATCH', path: '/api/rows/:rowId', purpose: 'Patch analyst-editable row fields with audit.' },
     { method: 'GET', path: '/api/rules', purpose: 'List DAF-derived rule definitions and seed the catalog if empty.' },
@@ -509,6 +510,7 @@ function exportHeaders(): string[] {
     'Validation Status',
     'Excluded',
     'Excluded Reason',
+    'Compliance Bucket',
     'Outcome Reporting',
     'Analyst Notes'
   ];
@@ -531,6 +533,7 @@ function exportValue(row: WorkflowRow, header: string): string | number | boolea
     'Validation Status': row.validationStatus,
     Excluded: row.excluded,
     'Excluded Reason': row.excludedReason,
+    'Compliance Bucket': bucketForRow(row).label,
     'Outcome Reporting': row.outcomeReporting,
     'Analyst Notes': row.analystNotes
   };

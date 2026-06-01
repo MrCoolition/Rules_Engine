@@ -3,6 +3,7 @@ import type {
   AutomationLevel,
   BatchSummary,
   CompiledRuleLogic,
+  ComplianceBucketSummary,
   DafLogicRow,
   JsonValue,
   NormalizedRow,
@@ -27,6 +28,78 @@ import {
 } from './normalize.js';
 
 export const CATALOG_COMPILER_VERSION = '2026-06-01.daf-logic-v2';
+
+export interface BucketDefinition {
+  id: string;
+  label: string;
+  description: string;
+  tone: ComplianceBucketSummary['tone'];
+}
+
+const BUCKET_DEFINITIONS: BucketDefinition[] = [
+  {
+    id: 'auto-approved',
+    label: 'Auto Approved',
+    description: 'Rows the engine can approve cleanly from DAF logic.',
+    tone: 'good'
+  },
+  {
+    id: 'approved-1x',
+    label: 'Approved 1X',
+    description: 'One-time approved requests and PRF 1X closeout rows.',
+    tone: 'good'
+  },
+  {
+    id: 'vendor-exclusions',
+    label: 'Vendor Exclusions',
+    description: 'Rows removed from the managed workflow by vendor/pre-processing rules.',
+    tone: 'dark'
+  },
+  {
+    id: 'data-issues',
+    label: 'Data Issues',
+    description: 'Rows missing required identifiers or carrying invalid source data.',
+    tone: 'bad'
+  },
+  {
+    id: 'denied',
+    label: 'Denied / Cannot Add',
+    description: 'Rows the rules classify as denied, cannot add, or not in stock.',
+    tone: 'bad'
+  },
+  {
+    id: 'use-right',
+    label: 'Use Right / Conversion',
+    description: 'Rows routed to conversion/use-right handling.',
+    tone: 'info'
+  },
+  {
+    id: 'find-alt',
+    label: 'Find Alt First',
+    description: 'Rows that need an alternate item before approval or denial.',
+    tone: 'warn'
+  },
+  {
+    id: 'cdm-review',
+    label: 'CDM Review',
+    description: 'Rows that need category manager review.',
+    tone: 'warn'
+  },
+  {
+    id: 'compliance-review',
+    label: 'Compliance Review',
+    description: 'Rows the engine flagged for analyst or compliance review.',
+    tone: 'warn'
+  },
+  {
+    id: 'assigned-processing',
+    label: 'Assigned for Processing',
+    description: 'Rows assigned to a specialist or downstream operational workflow.',
+    tone: 'info'
+  }
+];
+
+const DEFAULT_BUCKET = BUCKET_DEFINITIONS.find((bucket) => bucket.id === 'assigned-processing') ?? BUCKET_DEFINITIONS[0];
 
 interface ExecutableSpec {
   predicate: Predicate;
@@ -169,6 +242,7 @@ export function executeRow(input: WorkflowRow, variants: RuleVariant[]): Workflo
     row.validationStatus = appendText(row.validationStatus, 'Executable rule catalog missing');
     row.queueBucket = 'Rule Catalog Review';
     row.outcomeReporting = classifyOutcome(row);
+    row.queueBucket = bucketForRow(row).label;
     row.updatedAt = now;
     return row;
   }
@@ -198,6 +272,7 @@ export function executeRow(input: WorkflowRow, variants: RuleVariant[]): Workflo
   }
   row.status = row.excluded ? 'Excluded' : row.needsReview ? 'Review' : 'Ready';
   row.outcomeReporting = classifyOutcome(row);
+  row.queueBucket = bucketForRow(row).label;
   row.updatedAt = now;
   return row;
 }
@@ -222,6 +297,7 @@ export function applyRowPatch(row: WorkflowRow, patch: Record<string, unknown>):
   next.lastSavedAt = new Date().toISOString();
   next.updatedAt = next.lastSavedAt;
   next.outcomeReporting = classifyOutcome(next);
+  next.queueBucket = bucketForRow(next).label;
   return refreshDerived(next);
 }
 
@@ -234,6 +310,7 @@ export function filterRows(rows: WorkflowRow[], query: URLSearchParams): { rows:
   const status = cleanText(query.get('status'));
   const buysmartAction = cleanText(query.get('buysmartAction'));
   const outcome = cleanText(query.get('outcome'));
+  const bucket = cleanText(query.get('bucket'));
   const needsReview = query.get('needsReview');
   const excluded = query.get('excluded');
 
@@ -244,6 +321,7 @@ export function filterRows(rows: WorkflowRow[], query: URLSearchParams): { rows:
     if (status && row.status !== status) return false;
     if (buysmartAction && row.buysmartAction !== buysmartAction) return false;
     if (outcome && row.outcomeReporting !== outcome) return false;
+    if (bucket && bucketForRow(row).id !== bucket) return false;
     if (needsReview !== null && String(row.needsReview) !== needsReview) return false;
     if (excluded !== null && String(row.excluded) !== excluded) return false;
     return true;
@@ -251,7 +329,7 @@ export function filterRows(rows: WorkflowRow[], query: URLSearchParams): { rows:
 
   const start = (page - 1) * pageSize;
   return {
-    rows: filtered.slice(start, start + pageSize),
+    rows: filtered.slice(start, start + pageSize).map((row) => ({ ...row, queueBucket: bucketForRow(row).label })),
     total: filtered.length,
     page,
     pageSize
@@ -264,6 +342,7 @@ export function summarizeBatch(rows: WorkflowRow[]): BatchSummary {
   const businessCounts = countBy(rows, (row) => row.business || 'Unknown');
   const typeCounts = countBy(rows, (row) => row.requestType || 'Unknown');
   const withTrace = rows.filter((row) => row.executionTrace.length > 0).length;
+  const bucketSummaries = summarizeBuckets(rows);
   return {
     rowCount,
     reviewCount: rows.filter((row) => row.needsReview).length,
@@ -274,6 +353,7 @@ export function summarizeBatch(rows: WorkflowRow[]): BatchSummary {
     outcomeCounts,
     businessCounts,
     typeCounts,
+    bucketSummaries,
     automationCoveragePct: rowCount ? Math.round((withTrace / rowCount) * 1000) / 10 : 0
   };
 }
@@ -290,6 +370,55 @@ export function classifyOutcome(row: WorkflowRow): string {
   if (normalizeKey(row.action) === '1X' || action.includes('approved - 1x')) return '1x approved';
   if (row.needsReview) return 'unresolved exceptions';
   return 'assigned';
+}
+
+export function bucketForRow(row: WorkflowRow): BucketDefinition {
+  const actionText = `${row.action} ${row.ifInStockAction} ${row.buysmartAction} ${row.validationStatus} ${row.excludedReason} ${row.analystNotes}`.toLowerCase();
+  const outcome = row.outcomeReporting || classifyOutcome(row);
+  const find = (id: string): BucketDefinition => BUCKET_DEFINITIONS.find((bucket) => bucket.id === id) ?? DEFAULT_BUCKET;
+
+  if (row.excluded) return find('vendor-exclusions');
+  if (actionText.includes('missing min') || actionText.includes('missing din') || actionText.includes('invalid information')) return find('data-issues');
+  if (outcome === 'denied' || actionText.includes('denied') || normalizeKey(row.action) === 'NO') return find('denied');
+  if (outcome === 'use right' || actionText.includes('use right')) return find('use-right');
+  if (outcome === 'find alt first' || actionText.includes('find alt')) return find('find-alt');
+  if (outcome === 'send/check with CDM' || actionText.includes('cdm')) return find('cdm-review');
+  if (row.needsReview || outcome === 'unresolved exceptions') return find('compliance-review');
+  if (outcome === '1x approved' || normalizeKey(row.action) === '1X' || actionText.includes('approved - 1x')) return find('approved-1x');
+  if (outcome === 'approved' || row.buysmartAction.toLowerCase() === 'approved') return find('auto-approved');
+  return find('assigned-processing');
+}
+
+function summarizeBuckets(rows: WorkflowRow[]): ComplianceBucketSummary[] {
+  return BUCKET_DEFINITIONS.map((bucket) => {
+    const bucketRows = rows.filter((row) => bucketForRow(row).id === bucket.id);
+    const outcomeKeys = [...new Set(bucketRows.map((row) => row.outcomeReporting || classifyOutcome(row)).filter(Boolean))].sort();
+    const ruleIds = [
+      ...new Set(
+        bucketRows
+          .flatMap((row) => row.executionTrace.map((trace) => trace.runtimeRuleId || trace.ruleId))
+          .filter(Boolean)
+      )
+    ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    return {
+      ...bucket,
+      count: bucketRows.length,
+      reviewCount: bucketRows.filter((row) => row.needsReview).length,
+      outcomeKeys,
+      ruleIds: ruleIds.slice(0, 12),
+      examples: bucketRows.slice(0, 3).map((row) => ({
+        rowId: row.id,
+        caseNumber: row.caseNumber,
+        vendor: row.vendor,
+        description: row.description,
+        action: row.action,
+        buysmartAction: row.buysmartAction,
+        outcomeReporting: row.outcomeReporting,
+        ruleApplied: row.ruleApplied
+      }))
+    };
+  }).filter((bucket) => bucket.count > 0);
 }
 
 export function catalogSnapshot(rules: RuleDefinition[]): JsonValue {
