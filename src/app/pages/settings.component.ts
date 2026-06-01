@@ -10,16 +10,16 @@ import type { HealthResponse, RouteManifest } from '../models';
     <section class="page-title">
       <div>
         <p>Settings</p>
-        <h1>API and environment</h1>
+        <h1>System readiness</h1>
       </div>
-      <button class="button" (click)="bootstrap()">Bootstrap Neon Schema</button>
+      <button class="button" (click)="bootstrap()">Repair Schema + Rules</button>
     </section>
 
     <section class="kpi-grid">
       <article class="panel kpi"><small>Store</small><strong>{{ health?.store || '-' }}</strong></article>
-      <article class="panel kpi"><small>Database</small><strong>{{ health?.databaseConfigured ? 'Ready' : 'Memory' }}</strong></article>
-      <article class="panel kpi"><small>DAF</small><strong>{{ health?.defaultDafWorkbook ? 'Found' : 'Missing' }}</strong></article>
-      <article class="panel kpi"><small>Source</small><strong>{{ health?.defaultSourceWorkbook ? 'Found' : 'Missing' }}</strong></article>
+      <article class="panel kpi"><small>Database</small><strong>{{ health?.databaseConfigured ? 'Neon' : 'Missing' }}</strong></article>
+      <article class="panel kpi"><small>Rules</small><strong>{{ health?.ruleCount ?? '-' }}</strong></article>
+      <article class="panel kpi"><small>Executable</small><strong>{{ health?.executableVariantCount ?? '-' }}</strong></article>
     </section>
 
     @if (message) {
@@ -51,24 +51,6 @@ import type { HealthResponse, RouteManifest } from '../models';
   `,
   styles: [
     `
-      .page-title {
-        display: flex;
-        justify-content: space-between;
-        align-items: end;
-        margin-bottom: 1rem;
-      }
-
-      .page-title p {
-        margin: 0 0 0.25rem;
-        color: var(--teal);
-        font-weight: 900;
-        text-transform: uppercase;
-      }
-
-      .page-title h1 {
-        margin: 0;
-      }
-
       .settings-message,
       .route-row {
         margin-top: 1rem;
@@ -91,8 +73,8 @@ import type { HealthResponse, RouteManifest } from '../models';
         display: inline-block;
         padding: 0.2rem 0.45rem;
         border-radius: 6px;
-        background: #eef2ff;
-        color: #3730a3;
+        background: #f0f3f6;
+        color: var(--ink);
         font-size: 0.78rem;
         font-weight: 800;
         overflow-wrap: anywhere;
@@ -128,7 +110,7 @@ export class SettingsComponent implements OnInit {
 
   async bootstrap(): Promise<void> {
     const result = await this.api.bootstrap();
-    this.message = `Bootstrap complete. Statements applied: ${result.statements}.`;
+    this.message = `Repair complete. Statements checked: ${result.statements}. Rules: ${result.ruleCount ?? 0}. Executable variants: ${result.executableVariantCount ?? 0}.`;
     await this.refresh();
   }
 }

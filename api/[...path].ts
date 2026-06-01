@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import ExcelJS from 'exceljs';
+import { DEFAULT_DAF_PARSED_WORKBOOK } from './_shared/daf-seed.js';
 import {
   buildRuleCatalog,
   catalogSnapshot,
@@ -7,7 +8,7 @@ import {
   executeRows,
   summarizeBatch
 } from './_shared/engine.js';
-import type { JsonValue, RouteManifest, RowExecutionResult, RuleRun, WorkflowRow } from './_shared/types.js';
+import type { JsonValue, RouteManifest, RowExecutionResult, RuleDefinition, RuleImportReport, RuleRun, WorkflowRow } from './_shared/types.js';
 import { createWorkflowRow } from './_shared/normalize.js';
 import { DEFAULT_DAF_FILE, DEFAULT_SOURCE_FILE, loadWorkbookFile, parseDafWorkbook, parseSourceWorkbook, workbookExists } from './_shared/workbooks.js';
 import { getStore, newId } from './_shared/store.js';
@@ -20,11 +21,11 @@ const manifest: RouteManifest = {
     { path: '/execute', label: 'Execution Console', purpose: 'Optional run console for selected batches.' },
     { path: '/workbench', label: 'Analyst Workbench', purpose: 'Search, filter, review, and edit workflow row decisions.' },
     { path: '/reports', label: 'Outcome Reporting', purpose: 'Rollups, coverage, and CSV/XLSX export.' },
-    { path: '/rules', label: 'Rule Catalog', purpose: 'Browse imported DAF rules, variants, status, and automation level.' },
+    { path: '/rules', label: 'Rule Catalog', purpose: 'Browse and sync the DB-backed compliance rule catalog.' },
     { path: '/settings', label: 'Settings', purpose: 'Environment health, schema bootstrap, and API route manifest.' }
   ],
   apiRoutes: [
-    { method: 'GET', path: '/api/health', purpose: 'Environment and database status.' },
+    { method: 'GET', path: '/api/health', purpose: 'Environment, database, and seeded rule readiness.' },
     { method: 'GET', path: '/api/routes', purpose: 'Frontend and API route manifest.' },
     { method: 'POST', path: '/api/bootstrap', purpose: 'Create Neon schema tables and indexes.' },
     { method: 'GET', path: '/api/batches', purpose: 'List source batches.' },
@@ -36,8 +37,9 @@ const manifest: RouteManifest = {
     { method: 'GET', path: '/api/batches/:batchId/summary', purpose: 'Batch KPI and chart-ready summary.' },
     { method: 'POST', path: '/api/batches/:batchId/export', purpose: 'Export CSV or XLSX outcomes.' },
     { method: 'PATCH', path: '/api/rows/:rowId', purpose: 'Patch analyst-editable row fields with audit.' },
-    { method: 'GET', path: '/api/rules', purpose: 'List rule definitions and latest variants.' },
-    { method: 'POST', path: '/api/rules/import-daf', purpose: 'Admin-only rule catalog import. Normal processing uses rules already in Neon.' },
+    { method: 'GET', path: '/api/rules', purpose: 'List DAF-derived rule definitions and seed the catalog if empty.' },
+    { method: 'POST', path: '/api/rules/seed', purpose: 'Seed Neon with the bundled DAF-derived rule catalog.' },
+    { method: 'POST', path: '/api/rules/import-daf', purpose: 'Admin-only rule catalog import override. Normal processing uses bundled DB rules.' },
     { method: 'GET', path: '/api/rules/:ruleId', purpose: 'Rule details, version, and variants.' },
     { method: 'POST', path: '/api/rules/:ruleId/versions', purpose: 'Create a draft version from the current rule.' },
     { method: 'PATCH', path: '/api/rules/versions/:versionId', purpose: 'Edit draft/ready version metadata and variants.' },
@@ -62,12 +64,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
   try {
     if (req.method === 'GET' && pathEquals(path, 'health')) {
+      const seededCatalog = await getSeededRuleCatalog(store);
       sendJson(res, 200, {
         ok: true,
         store: store.kind,
         databaseConfigured: hasDatabaseUrl(),
         defaultDafWorkbook: await workbookExists(DEFAULT_DAF_FILE),
         defaultSourceWorkbook: await workbookExists(DEFAULT_SOURCE_FILE),
+        rulesSeeded: seededCatalog.seeded,
+        ruleCount: seededCatalog.rules.length,
+        executableVariantCount: seededCatalog.report.executableVariants,
         timestamp: new Date().toISOString()
       });
       return;
@@ -80,8 +86,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     if (req.method === 'POST' && pathEquals(path, 'bootstrap')) {
       const result = await store.bootstrap();
-      await store.audit('schema.bootstrap', 'system', null, result);
-      sendJson(res, 200, result);
+      const seededCatalog = await getSeededRuleCatalog(store);
+      const payload = {
+        ...result,
+        rulesSeeded: seededCatalog.seeded,
+        ruleCount: seededCatalog.rules.length,
+        executableVariantCount: seededCatalog.report.executableVariants
+      };
+      await store.audit('schema.bootstrap', 'system', null, payload);
+      sendJson(res, 200, payload);
       return;
     }
 
@@ -165,15 +178,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     if (req.method === 'GET' && pathEquals(path, 'rules')) {
-      sendJson(res, 200, { rules: await store.listRules() });
+      const seededCatalog = await getSeededRuleCatalog(store);
+      sendJson(res, 200, seededCatalog);
+      return;
+    }
+
+    if (req.method === 'POST' && pathEquals(path, 'rules', 'seed')) {
+      const body = await readJson(req, true);
+      const seededCatalog = await getSeededRuleCatalog(store, Boolean(body['force']));
+      sendJson(res, 200, seededCatalog);
       return;
     }
 
     if (req.method === 'POST' && pathEquals(path, 'rules', 'import-daf')) {
       const body = await readJson(req, true);
       const fileName = stringBody(body['fileName']) || DEFAULT_DAF_FILE;
-      const buffer = body['fileBase64'] ? base64ToBuffer(stringBody(body['fileBase64'])) : await loadWorkbookFile(DEFAULT_DAF_FILE);
-      const parsed = await parseDafWorkbook(fileName, buffer);
+      const parsed = body['fileBase64']
+        ? await parseDafWorkbook(fileName, base64ToBuffer(stringBody(body['fileBase64'])))
+        : DEFAULT_DAF_PARSED_WORKBOOK;
       const { rules, report } = buildRuleCatalog(parsed);
       await store.replaceRuleCatalog(rules);
       sendJson(res, 200, { report, rules });
@@ -282,7 +304,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const rowIds = Array.isArray(body['rowIds']) ? body['rowIds'].map(String) : undefined;
       const dryRun = Boolean(body['dryRun']);
       const beforeRows = await store.getRows(batchId);
-      const rules = await store.listRules();
+      const { rules } = await getSeededRuleCatalog(store);
       const executableRuleCount = rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length;
       if (executableRuleCount === 0) {
         throw httpError(409, 'No approved executable rules are loaded in the database.');
@@ -325,6 +347,48 @@ async function rowFromRequestBody(store: ReturnType<typeof getStore>, body: Reco
     return createWorkflowRow('simulation', body['rawRow'] as Record<string, JsonValue>, 1, new Date().toISOString(), newId);
   }
   throw httpError(400, 'Provide batchId + rowId or rawRow.');
+}
+
+async function getSeededRuleCatalog(
+  store: ReturnType<typeof getStore>,
+  force = false
+): Promise<{ rules: RuleDefinition[]; report: RuleImportReport; seeded: boolean }> {
+  await store.bootstrap();
+  const existingRules = await store.listRules();
+  if (!force && existingRules.length > 0) {
+    return { rules: existingRules, report: reportFromRules(existingRules), seeded: false };
+  }
+
+  const { rules, report } = buildRuleCatalog(DEFAULT_DAF_PARSED_WORKBOOK);
+  try {
+    await store.replaceRuleCatalog(rules);
+    await store.audit('rules.seeded', 'rule_catalog', null, {
+      source: DEFAULT_DAF_PARSED_WORKBOOK.fileName,
+      force,
+      ruleCount: rules.length,
+      executableVariantCount: report.executableVariants
+    });
+    return { rules, report, seeded: true };
+  } catch (error) {
+    const recoveredRules = await store.listRules().catch(() => []);
+    if (recoveredRules.length > 0) return { rules: recoveredRules, report: reportFromRules(recoveredRules), seeded: false };
+    throw error;
+  }
+}
+
+function reportFromRules(rules: RuleDefinition[]): RuleImportReport {
+  const variants = rules.flatMap((rule) => rule.variants);
+  return {
+    created: 0,
+    updated: 0,
+    unchanged: rules.length,
+    warnings: [],
+    duplicateRuleIds: [],
+    sheetNames: DEFAULT_DAF_PARSED_WORKBOOK.sheetNames,
+    executableVariants: variants.filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length,
+    guidedVariants: variants.filter((variant) => variant.automationLevel === 'guided').length,
+    manualVariants: variants.filter((variant) => variant.automationLevel === 'manual' || variant.automationLevel === 'future').length
+  };
 }
 
 function createRuleRun(

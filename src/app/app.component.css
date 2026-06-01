@@ -1,6 +1,6 @@
 .app-shell {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -8,25 +8,29 @@
   position: sticky;
   top: 0;
   height: 100vh;
-  padding: 1.1rem;
-  background: #101827;
-  color: white;
+  padding: 1rem 0.85rem;
+  background: #ffffff;
+  border-right: 1px solid var(--line);
+  color: var(--ink);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  min-height: 3.2rem;
+  gap: 0.7rem;
+  min-height: 3rem;
+  padding: 0 0.2rem 1rem;
+  border-bottom: 1px solid var(--line);
 }
 
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 2.45rem;
-  height: 2.45rem;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #2563eb, #0f9f92);
+  width: 2.15rem;
+  height: 2.15rem;
+  border-radius: 7px;
+  background: #101318;
+  color: white;
   font-weight: 900;
 }
 
@@ -35,33 +39,43 @@
   display: block;
 }
 
+.brand strong {
+  line-height: 1.1;
+}
+
 .brand small {
-  color: #aab6c8;
-  margin-top: 0.12rem;
+  color: var(--muted);
+  margin-top: 0.18rem;
+  font-size: 0.78rem;
 }
 
 nav {
   display: grid;
-  gap: 0.3rem;
-  margin-top: 1.4rem;
+  gap: 0.2rem;
+  margin-top: 1rem;
 }
 
 nav a {
-  padding: 0.75rem 0.8rem;
+  padding: 0.58rem 0.62rem;
   border-radius: 7px;
-  color: #d7deeb;
-  font-weight: 750;
+  color: #3f4a5b;
+  font-size: 0.92rem;
+  font-weight: 720;
 }
 
-nav a.active,
-nav a:hover {
-  background: rgba(255, 255, 255, 0.12);
+nav a.active {
+  background: #101318;
   color: white;
+}
+
+nav a:hover:not(.active) {
+  background: var(--surface-2);
+  color: var(--ink);
 }
 
 .main {
   min-width: 0;
-  padding: 1.4rem;
+  padding: 1.65rem 1.75rem;
 }
 
 @media (max-width: 900px) {
@@ -72,10 +86,17 @@ nav a:hover {
   .side-rail {
     position: relative;
     height: auto;
+    padding: 0.75rem;
+  }
+
+  .brand {
+    border-bottom: 0;
+    padding-bottom: 0.55rem;
   }
 
   nav {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 0.4rem;
   }
 }
 
@@ -85,6 +106,6 @@ nav a:hover {
   }
 
   .main {
-    padding: 0.9rem;
+    padding: 1rem;
   }
 }

@@ -76,7 +76,7 @@ import type { BatchSummary, SourceBatch } from '../models';
 
       .page-title p {
         margin: 0 0 0.25rem;
-        color: var(--teal);
+        color: var(--accent);
         font-weight: 900;
         text-transform: uppercase;
       }
@@ -128,7 +128,7 @@ import type { BatchSummary, SourceBatch } from '../models';
       }
 
       .bar-line.teal .bar i {
-        background: var(--teal);
+        background: var(--accent);
       }
     `
   ]

@@ -11,56 +11,81 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
   template: `
     <section class="page-title">
       <div>
-        <p>Compliance Rules</p>
-        <h1>Process PRF/SORF/SRF workbook</h1>
+        <p>Process</p>
+        <h1>Run PRF workbook</h1>
+        <p class="page-copy">Upload the standard PRF/SORF/SRF file. The engine uses DAF-derived rules seeded in Neon and returns bucketed outcomes.</p>
       </div>
       <div class="status-strip">
-        <span [class]="health?.databaseConfigured ? 'tag good' : 'tag bad'">{{ health?.databaseConfigured ? 'Neon ready' : 'No database' }}</span>
-        <span [class]="rulesReady ? 'tag good' : 'tag bad'">{{ rules.length }} rules</span>
-        <span class="tag info">{{ executableVariantCount }} executable variants</span>
+        @if (loadingReadiness) {
+          <span class="tag info">Checking</span>
+        } @else {
+          <span [class]="dbReady ? 'tag good' : 'tag bad'">{{ dbReady ? 'Neon connected' : 'No database' }}</span>
+          <span [class]="rulesReady ? 'tag good' : 'tag bad'">{{ rules.length }} rules</span>
+          <span [class]="executableVariantCount ? 'tag good' : 'tag bad'">{{ executableVariantCount }} executable</span>
+        }
       </div>
     </section>
 
-    <section class="panel process-card">
-      <div class="process-copy">
-        <h2>Upload PRF file</h2>
-        <p class="subtle">Rules are already loaded from Neon. Upload the daily workbook, run the rules, then review the bucketed outcomes.</p>
+    <section class="panel workflow-panel">
+      <div class="workflow-grid">
+        <div class="workbook-pane">
+          <h2>Workbook</h2>
+          <div class="form-grid">
+            <label class="field">
+              <span>Batch name</span>
+              <input [(ngModel)]="batchName" placeholder="Daily PRF/SORF/SRF">
+            </label>
+            <label class="field">
+              <span>Reporting date</span>
+              <input type="date" [(ngModel)]="reportingDate">
+            </label>
+          </div>
+
+          <label class="drop">
+            <input type="file" accept=".xlsx" (change)="onSourceFile($event)">
+            <strong>{{ sourceFile?.name || 'Choose workbook' }}</strong>
+            <span>.xlsx PRF/SORF/SRF source file</span>
+          </label>
+
+          <div class="actions">
+            <button class="button" (click)="processWorkbook()" [disabled]="busy || loadingReadiness || !sourceFile || !rulesReady || !dbReady">
+              {{ busy ? busyLabel : 'Process Workbook' }}
+            </button>
+            @if (latestBatchId) {
+              <a class="button secondary" routerLink="/workbench" [queryParams]="{ batchId: latestBatchId }">Review Rows</a>
+              <button class="button ghost" (click)="export('xlsx')">Export XLSX</button>
+            }
+          </div>
+        </div>
+
+        <aside class="engine-pane">
+          <h2>Engine</h2>
+          <div class="engine-row">
+            <span>Database</span>
+            <strong>{{ loadingReadiness ? 'Checking' : dbReady ? 'Neon' : 'Missing' }}</strong>
+          </div>
+          <div class="engine-row">
+            <span>Rule catalog</span>
+            <strong>{{ loadingReadiness ? 'Checking' : rulesReady ? 'Ready' : 'Empty' }}</strong>
+          </div>
+          <div class="engine-row">
+            <span>Rule source</span>
+            <strong>DAF seed</strong>
+          </div>
+
+          @if (loadingReadiness) {
+            <div class="alert info">Checking Neon and seeded rules.</div>
+          } @else if (readinessError) {
+            <div class="alert bad">{{ readinessError }}</div>
+          } @else if (!dbReady) {
+            <div class="alert bad">DATABASE_URL is not visible to this deployment.</div>
+          } @else if (!rulesReady) {
+            <div class="alert bad">No executable rules are available. Open Rules and sync the DB catalog.</div>
+          } @else {
+            <div class="alert good">Ready to process against {{ executableVariantCount }} executable rules.</div>
+          }
+        </aside>
       </div>
-
-      <div class="form-grid">
-        <label class="field">
-          <span>Batch name</span>
-          <input [(ngModel)]="batchName" placeholder="Daily PRF/SORF/SRF">
-        </label>
-        <label class="field">
-          <span>Reporting date</span>
-          <input type="date" [(ngModel)]="reportingDate">
-        </label>
-      </div>
-
-      <label class="drop">
-        <input type="file" accept=".xlsx" (change)="onSourceFile($event)">
-        <strong>{{ sourceFile?.name || 'Choose PRF/SORF/SRF workbook' }}</strong>
-        <span>Excel workbook, processed against DB rules</span>
-      </label>
-
-      <div class="actions">
-        <button class="button" (click)="processWorkbook()" [disabled]="busy || !sourceFile || !rulesReady || !health?.databaseConfigured">
-          {{ busy ? busyLabel : 'Process Workbook' }}
-        </button>
-        @if (latestBatchId) {
-          <a class="button secondary" routerLink="/workbench" [queryParams]="{ batchId: latestBatchId }">Review Rows</a>
-          <button class="button ghost" (click)="export('xlsx')">Export XLSX</button>
-        }
-      </div>
-
-      @if (!health?.databaseConfigured) {
-        <div class="alert bad">Neon is not connected in this deployment. Add DATABASE_URL, redeploy, then process a workbook.</div>
-      } @else if (!rulesReady) {
-        <div class="alert bad">No executable rules are available in Neon. The rules table needs to be seeded before processing.</div>
-      } @else {
-        <div class="alert good">Ready. Upload the standard workbook and click Process Workbook.</div>
-      }
     </section>
 
     @if (run) {
@@ -87,7 +112,7 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
         <article class="panel bucket-card">
           <h2>Request Mix</h2>
           @for (entry of entries(summary.typeCounts); track entry[0]) {
-            <div class="bar-line teal">
+            <div class="bar-line accent">
               <span>{{ entry[0] }}</span>
               <div class="bar"><i [style.width.%]="percent(entry[1], summary.rowCount)"></i></div>
               <strong>{{ entry[1] }}</strong>
@@ -103,67 +128,53 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
   `,
   styles: [
     `
-      .page-title {
-        display: flex;
-        justify-content: space-between;
-        align-items: end;
-        gap: 1rem;
-        margin-bottom: 1rem;
-      }
-
-      .page-title p {
-        margin: 0 0 0.25rem;
-        color: var(--teal);
-        font-weight: 900;
-        text-transform: uppercase;
-      }
-
-      .page-title h1 {
-        margin: 0;
-        font-size: clamp(2rem, 4vw, 3rem);
-      }
-
-      .status-strip,
-      .actions {
+      .status-strip {
         display: flex;
         flex-wrap: wrap;
-        gap: 0.55rem;
-        align-items: center;
+        gap: 0.45rem;
+        justify-content: flex-end;
       }
 
-      .process-card,
-      .bucket-card {
+      .workflow-panel {
         padding: 1rem;
       }
 
-      .process-copy h2,
-      .bucket-card h2 {
-        margin: 0;
+      .workflow-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 280px;
+        gap: 1rem;
       }
 
-      .subtle {
-        color: var(--muted);
-        line-height: 1.45;
+      .workbook-pane h2,
+      .engine-pane h2,
+      .bucket-card h2 {
+        margin: 0 0 0.85rem;
+        font-size: 1rem;
       }
 
       .form-grid {
         display: grid;
-        grid-template-columns: minmax(220px, 1fr) 190px;
-        gap: 0.8rem;
-        margin: 1rem 0;
+        grid-template-columns: minmax(220px, 1fr) 180px;
+        gap: 0.75rem;
       }
 
       .drop {
         display: grid;
         place-items: center;
-        min-height: 10rem;
-        margin-bottom: 1rem;
-        border: 1px dashed rgba(37, 99, 235, 0.35);
+        gap: 0.25rem;
+        min-height: 7rem;
+        margin: 0.85rem 0;
+        border: 1px dashed #aeb9c8;
         border-radius: var(--radius);
-        background: #f8fbff;
+        background: #f8fafc;
         color: var(--muted);
         text-align: center;
         cursor: pointer;
+      }
+
+      .drop:hover {
+        border-color: var(--accent);
+        background: #f6fffd;
       }
 
       .drop input {
@@ -176,47 +187,63 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
         overflow-wrap: anywhere;
       }
 
-      .alert {
-        margin-top: 1rem;
-        padding: 0.8rem 0.9rem;
-        border-radius: 7px;
-        font-weight: 750;
+      .drop span {
+        font-size: 0.86rem;
       }
 
-      .alert.good {
-        background: #dcfce7;
-        color: #166534;
+      .engine-pane {
+        display: grid;
+        align-content: start;
+        gap: 0.7rem;
+        padding-left: 1rem;
+        border-left: 1px solid var(--line);
       }
 
-      .alert.bad {
-        background: #fee2e2;
-        color: #991b1b;
+      .engine-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        padding-bottom: 0.58rem;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.9rem;
+      }
+
+      .engine-row span {
+        color: var(--muted);
+      }
+
+      .engine-row strong {
+        text-align: right;
       }
 
       .result-kpis,
       .result-row,
       .output {
-        margin-top: 1rem;
+        margin-top: 0.9rem;
+      }
+
+      .bucket-card {
+        padding: 1rem;
       }
 
       .bar-line {
         display: grid;
-        grid-template-columns: 150px minmax(0, 1fr) 52px;
+        grid-template-columns: 150px minmax(0, 1fr) 48px;
         align-items: center;
-        gap: 0.7rem;
-        margin: 0.75rem 0;
+        gap: 0.65rem;
+        margin: 0.65rem 0;
       }
 
       .bar-line span {
         color: var(--muted);
-        font-weight: 750;
+        font-weight: 720;
         overflow-wrap: anywhere;
       }
 
       .bar {
-        height: 0.72rem;
-        border-radius: 6px;
-        background: #e2e8f0;
+        height: 0.56rem;
+        border-radius: 999px;
+        background: #e5eaf0;
         overflow: hidden;
       }
 
@@ -227,24 +254,27 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
         background: var(--primary);
       }
 
-      .bar-line.teal .bar i {
-        background: var(--teal);
+      .bar-line.accent .bar i {
+        background: var(--accent);
       }
 
       .output {
-        padding: 1rem;
+        padding: 0.85rem;
         white-space: pre-wrap;
         overflow-x: auto;
       }
 
-      @media (max-width: 760px) {
-        .page-title {
-          align-items: stretch;
-          flex-direction: column;
-        }
-
+      @media (max-width: 900px) {
+        .workflow-grid,
         .form-grid {
           grid-template-columns: 1fr;
+        }
+
+        .engine-pane {
+          padding-left: 0;
+          border-left: 0;
+          border-top: 1px solid var(--line);
+          padding-top: 1rem;
         }
       }
     `
@@ -254,6 +284,8 @@ export class UploadIngestComponent implements OnInit {
   private readonly api = inject(ApiService);
   health: HealthResponse | null = null;
   rules: RuleDefinition[] = [];
+  loadingReadiness = true;
+  readinessError = '';
   busy = false;
   busyLabel = '';
   message = '';
@@ -264,8 +296,12 @@ export class UploadIngestComponent implements OnInit {
   run: RuleRun | null = null;
   summary: BatchSummary | null = null;
 
+  get dbReady(): boolean {
+    return this.health?.databaseConfigured === true;
+  }
+
   get executableVariantCount(): number {
-    return this.rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable).length;
+    return this.rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length;
   }
 
   get rulesReady(): boolean {
@@ -284,18 +320,18 @@ export class UploadIngestComponent implements OnInit {
   }
 
   async processWorkbook(): Promise<void> {
-    if (!this.sourceFile || !this.rulesReady || !this.health?.databaseConfigured) return;
+    if (!this.sourceFile || !this.rulesReady || !this.dbReady) return;
     this.busy = true;
     try {
-      this.busyLabel = 'Uploading...';
+      this.busyLabel = 'Uploading';
       const upload = await this.api.uploadWorkbook(this.sourceFile, this.reportingDate, this.batchName);
       this.latestBatchId = upload.batchId;
 
-      this.busyLabel = 'Running rules...';
+      this.busyLabel = 'Running rules';
       const result = await this.api.runBatch(upload.batchId, false);
       this.run = result.run;
 
-      this.busyLabel = 'Loading buckets...';
+      this.busyLabel = 'Loading buckets';
       this.summary = await this.api.batchSummary(upload.batchId);
       this.message = upload.warnings.length ? upload.warnings.join('\n') : '';
     } catch (error) {
@@ -319,7 +355,16 @@ export class UploadIngestComponent implements OnInit {
   }
 
   private async refreshReadiness(): Promise<void> {
-    [this.health, this.rules] = await Promise.all([this.api.health(), this.api.listRules()]);
+    this.loadingReadiness = true;
+    this.readinessError = '';
+    try {
+      this.health = await this.api.health();
+      this.rules = await this.api.listRules();
+    } catch (error) {
+      this.readinessError = this.errorMessage(error);
+    } finally {
+      this.loadingReadiness = false;
+    }
   }
 
   private errorMessage(error: unknown): string {

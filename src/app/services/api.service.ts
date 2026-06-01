@@ -15,8 +15,8 @@ export class ApiService {
     return firstValueFrom(this.http.get<RouteManifest>('/api/routes'));
   }
 
-  bootstrap(): Promise<{ ok: boolean; statements: number }> {
-    return firstValueFrom(this.http.post<{ ok: boolean; statements: number }>('/api/bootstrap', {}));
+  bootstrap(): Promise<{ ok: boolean; statements: number; rulesSeeded?: boolean; ruleCount?: number; executableVariantCount?: number }> {
+    return firstValueFrom(this.http.post<{ ok: boolean; statements: number; rulesSeeded?: boolean; ruleCount?: number; executableVariantCount?: number }>('/api/bootstrap', {}));
   }
 
   listBatches(): Promise<SourceBatch[]> {
@@ -67,6 +67,10 @@ export class ApiService {
 
   importDefaultDaf(): Promise<{ report: Record<string, unknown>; rules: RuleDefinition[] }> {
     return firstValueFrom(this.http.post<{ report: Record<string, unknown>; rules: RuleDefinition[] }>('/api/rules/import-daf', {}));
+  }
+
+  seedRules(force = false): Promise<{ report: Record<string, unknown>; rules: RuleDefinition[]; seeded: boolean }> {
+    return firstValueFrom(this.http.post<{ report: Record<string, unknown>; rules: RuleDefinition[]; seeded: boolean }>('/api/rules/seed', { force }));
   }
 
   importDaf(file: File): Promise<{ report: Record<string, unknown>; rules: RuleDefinition[] }> {

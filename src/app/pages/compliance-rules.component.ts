@@ -11,21 +11,24 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
     <section class="page-head">
       <div>
         <p class="eyebrow">Compliance Rules</p>
-        <h1>PRF/SORF/SRF processing</h1>
+        <h1>PRF/SORF/SRF engine</h1>
+        <p class="page-copy">Upload the standard file, execute the DAF-derived DB rules, then review bucketed outcomes.</p>
       </div>
       <div class="toolbar">
         <a class="button" routerLink="/upload">Process Workbook</a>
       </div>
     </section>
 
-    @if (message) {
-      <div class="notice">{{ message }}</div>
+    @if (error) {
+      <div class="alert bad notice">{{ error }}</div>
+    } @else if (loading) {
+      <div class="alert info notice">Checking Neon and rule readiness.</div>
     }
 
     <section class="kpi-grid">
       <article class="panel kpi">
         <small>Database</small>
-        <strong>{{ health?.databaseConfigured ? 'Neon' : 'Missing' }}</strong>
+        <strong>{{ loading ? 'Checking' : health?.databaseConfigured ? 'Neon' : 'Missing' }}</strong>
       </article>
       <article class="panel kpi">
         <small>Batches</small>
@@ -36,7 +39,7 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
         <strong>{{ rules.length }}</strong>
       </article>
       <article class="panel kpi">
-        <small>Executable Variants</small>
+        <small>Executable</small>
         <strong>{{ executableVariantCount }}</strong>
       </article>
     </section>
@@ -44,12 +47,12 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
     <section class="split content-row">
       <article class="panel card-pad">
         <div class="section-title">
-          <h2>Latest Batches</h2>
+          <h2>Recent Batches</h2>
           <a routerLink="/upload">Process</a>
         </div>
 
         @if (!batches.length) {
-          <div class="empty">No batches yet. Upload a PRF/SORF/SRF workbook to create the first workflow.</div>
+          <div class="empty">No batches yet. Process a PRF/SORF/SRF workbook to start.</div>
         } @else {
           <div class="table-scroll">
             <table class="data-table">
@@ -78,21 +81,21 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
 
       <article class="panel card-pad">
         <div class="section-title">
-          <h2>Rules Readiness</h2>
-          <a routerLink="/rules">Catalog</a>
+          <h2>Readiness</h2>
+          <a routerLink="/rules">Rules</a>
         </div>
         <div class="readiness">
           <div>
-            <span [class]="health?.databaseConfigured ? 'tag good' : 'tag warn'">{{ health?.databaseConfigured ? 'Neon connected' : 'Demo memory' }}</span>
-            <p>Rules and workflow rows persist in Neon when the database URL is configured.</p>
+            <span [class]="health?.databaseConfigured ? 'tag good' : 'tag bad'">{{ health?.databaseConfigured ? 'Neon connected' : 'No database' }}</span>
+            <p>DATABASE_URL must be available in Vercel for persisted batches and rule execution.</p>
           </div>
           <div>
-            <span [class]="rules.length ? 'tag good' : 'tag bad'">Rules loaded</span>
-            <p>{{ rules.length }} rule definitions are available from the database.</p>
+            <span [class]="rules.length ? 'tag good' : 'tag bad'">DAF rules seeded</span>
+            <p>{{ rules.length }} rule definitions are loaded from the DB catalog.</p>
           </div>
           <div>
             <span [class]="executableVariantCount ? 'tag good' : 'tag bad'">Executable variants</span>
-            <p>{{ executableVariantCount }} variants are enabled for batch execution.</p>
+            <p>{{ executableVariantCount }} approved variants can run against PRF rows.</p>
           </div>
         </div>
       </article>
@@ -100,30 +103,9 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
   `,
   styles: [
     `
-      .page-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: end;
-        gap: 1rem;
-        margin-bottom: 1rem;
-      }
-
-      .eyebrow {
-        margin: 0 0 0.25rem;
-        color: var(--teal);
-        font-weight: 900;
-        text-transform: uppercase;
-        font-size: 0.78rem;
-      }
-
-      h1 {
-        margin: 0;
-        font-size: clamp(2rem, 5vw, 3.4rem);
-        letter-spacing: 0;
-      }
-
-      .content-row {
-        margin-top: 1rem;
+      .content-row,
+      .notice {
+        margin-top: 0.9rem;
       }
 
       .card-pad {
@@ -135,7 +117,7 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
         justify-content: space-between;
         gap: 1rem;
         align-items: center;
-        margin-bottom: 0.8rem;
+        margin-bottom: 0.75rem;
       }
 
       .section-title h2 {
@@ -144,40 +126,19 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
       }
 
       .section-title a {
-        color: var(--primary);
-        font-weight: 800;
+        color: var(--accent-2);
+        font-weight: 780;
       }
 
       .readiness {
         display: grid;
-        gap: 0.85rem;
+        gap: 0.8rem;
       }
 
       .readiness p {
-        margin: 0.45rem 0 0;
+        margin: 0.38rem 0 0;
         color: var(--muted);
         line-height: 1.45;
-      }
-
-      .notice {
-        margin-bottom: 1rem;
-        padding: 0.8rem 1rem;
-        border-radius: var(--radius);
-        background: #ecfeff;
-        border: 1px solid #a5f3fc;
-        color: #155e75;
-        font-weight: 750;
-      }
-
-      code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      }
-
-      @media (max-width: 760px) {
-        .page-head {
-          align-items: stretch;
-          flex-direction: column;
-        }
       }
     `
   ]
@@ -187,10 +148,11 @@ export class ComplianceRulesComponent implements OnInit {
   health: HealthResponse | null = null;
   batches: SourceBatch[] = [];
   rules: RuleDefinition[] = [];
-  message = '';
+  loading = true;
+  error = '';
 
   get executableVariantCount(): number {
-    return this.rules.flatMap((rule) => rule.variants).filter((variant) => variant.isExecutable).length;
+    return this.rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length;
   }
 
   ngOnInit(): void {
@@ -198,7 +160,23 @@ export class ComplianceRulesComponent implements OnInit {
   }
 
   async refresh(): Promise<void> {
-    [this.health, this.batches, this.rules] = await Promise.all([this.api.health(), this.api.listBatches(), this.api.listRules()]);
+    this.loading = true;
+    this.error = '';
+    try {
+      this.health = await this.api.health();
+      [this.batches, this.rules] = await Promise.all([this.api.listBatches(), this.api.listRules()]);
+    } catch (error) {
+      this.error = this.errorMessage(error);
+    } finally {
+      this.loading = false;
+    }
   }
 
+  private errorMessage(error: unknown): string {
+    if (typeof error === 'object' && error && 'error' in error) {
+      const wrapped = error as { error?: { error?: string; message?: string } };
+      return wrapped.error?.error || wrapped.error?.message || 'Readiness check failed.';
+    }
+    return error instanceof Error ? error.message : 'Readiness check failed.';
+  }
 }

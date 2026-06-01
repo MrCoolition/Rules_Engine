@@ -4,6 +4,9 @@ export interface HealthResponse {
   databaseConfigured: boolean;
   defaultDafWorkbook: boolean;
   defaultSourceWorkbook: boolean;
+  rulesSeeded?: boolean;
+  ruleCount?: number;
+  executableVariantCount?: number;
   timestamp: string;
 }
 
