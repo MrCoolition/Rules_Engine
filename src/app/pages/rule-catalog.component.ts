@@ -12,10 +12,10 @@ import type { RuleDefinition } from '../models';
       <div>
         <p>Rules</p>
         <h1>Compliance rule catalog</h1>
-        <p class="page-copy">DAF logic is stored as database rules and used by the PRF/SORF/SRF engine.</p>
+        <p class="page-copy">Saved DAF logic drives the PRF/SORF/SRF workflow.</p>
       </div>
       <div class="toolbar">
-        <button class="button secondary" (click)="syncRules()" [disabled]="busy">{{ busy ? 'Repairing' : 'Repair DB Rules' }}</button>
+        <button class="button secondary" (click)="refreshRules()" [disabled]="busy">{{ busy ? 'Refreshing' : 'Refresh Rules' }}</button>
       </div>
     </section>
 
@@ -25,9 +25,9 @@ import type { RuleDefinition } from '../models';
         <input [(ngModel)]="filter" placeholder="R001, Canada, approval, manual">
       </label>
       <div class="rule-totals">
-        <span class="tag info">{{ loading ? 'Checking' : rules.length + ' definitions' }}</span>
-        <span class="tag good">{{ loading ? 'Checking' : executableCount + ' executable' }}</span>
-        <span class="tag warn">{{ loading ? 'Checking' : manualCount + ' guided/manual' }}</span>
+        <span class="tag info">{{ loading ? 'Loading' : rules.length + ' saved' }}</span>
+        <span class="tag good">{{ loading ? 'Loading' : executableCount + ' ready' }}</span>
+        <span class="tag warn">{{ loading ? 'Loading' : manualCount + ' guided' }}</span>
       </div>
     </section>
 
@@ -44,7 +44,7 @@ import type { RuleDefinition } from '../models';
         <div class="rule-row table-head">
           <span>Rule</span>
           <span>Scope</span>
-          <span>Variants</span>
+          <span>Runs</span>
           <span>Status</span>
           <span>Logic</span>
         </div>
@@ -59,11 +59,11 @@ import type { RuleDefinition } from '../models';
               <small>{{ rule.requestTypes.join(', ') || 'All types' }}</small>
             </div>
             <div>
-              <span>{{ executableFor(rule) }} executable</span>
+              <span>{{ executableFor(rule) }} ready</span>
               <small>{{ rule.variants.length }} total</small>
             </div>
             <div>
-              <span [class]="rule.automationLevel === 'alpha' ? 'tag good' : rule.automationLevel === 'guided' ? 'tag warn' : 'tag info'">{{ rule.automationLevel }}</span>
+              <span [class]="rule.automationLevel === 'alpha' ? 'tag good' : rule.automationLevel === 'guided' ? 'tag warn' : 'tag info'">{{ automationLabel(rule) }}</span>
             </div>
             <div class="logic-cell">
               <b>Filter</b>
@@ -222,14 +222,13 @@ export class RuleCatalogComponent implements OnInit {
     }
   }
 
-  async syncRules(): Promise<void> {
+  async refreshRules(): Promise<void> {
     this.busy = true;
     this.message = '';
     this.error = '';
     try {
-      const result = await this.api.seedRules(true);
-      this.rules = result.rules;
-      this.message = `Repaired ${result.rules.length} DAF-derived rules in the database.`;
+      this.rules = await this.api.listRules();
+      this.message = `Rules refreshed. ${this.rules.length} saved rules, ${this.executableCount} ready to run.`;
     } catch (error) {
       this.error = this.errorMessage(error);
     } finally {
@@ -248,6 +247,13 @@ export class RuleCatalogComponent implements OnInit {
 
   aggregateLogic(rule: RuleDefinition): string {
     return rule.variants[0]?.source?.compiledLogic?.aggregateLogic || rule.variants[0]?.source?.aggregateLogic || 'No aggregate action';
+  }
+
+  automationLabel(rule: RuleDefinition): string {
+    if (rule.automationLevel === 'alpha') return 'Ready';
+    if (rule.automationLevel === 'guided') return 'Guided';
+    if (rule.automationLevel === 'manual') return 'Manual';
+    return 'Reference';
   }
 
   private errorMessage(error: unknown): string {

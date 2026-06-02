@@ -13,15 +13,15 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
       <div>
         <p>Process</p>
         <h1>Run PRF workbook</h1>
-        <p class="page-copy">Upload the standard PRF/SORF/SRF file. The engine uses DAF-derived rules seeded in Neon and returns bucketed outcomes.</p>
+        <p class="page-copy">Upload the standard PRF/SORF/SRF file. The engine applies the saved compliance rules and returns bucketed outcomes.</p>
       </div>
       <div class="status-strip">
         @if (loadingReadiness && !health) {
-          <span class="tag info">Checking</span>
+          <span class="tag info">Loading rules</span>
         } @else {
-          <span [class]="dbReady ? 'tag good' : 'tag bad'">{{ dbReady ? 'Neon connected' : 'No database' }}</span>
+          <span [class]="readyForProcessing ? 'tag good' : 'tag bad'">{{ readyForProcessing ? 'Ready' : 'Unavailable' }}</span>
           <span [class]="rulesReady ? 'tag good' : 'tag bad'">{{ ruleCount }} rules</span>
-          <span [class]="executableVariantCount ? 'tag good' : 'tag bad'">{{ executableVariantCount }} executable</span>
+          <span [class]="executableVariantCount ? 'tag good' : 'tag bad'">{{ executableVariantCount }} ready</span>
         }
       </div>
     </section>
@@ -59,32 +59,32 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
         </div>
 
         <aside class="engine-pane">
-          <h2>Engine</h2>
+          <h2>Run Status</h2>
           <div class="engine-row">
-            <span>Database</span>
-            <strong>{{ loadingReadiness && !health ? 'Checking' : dbReady ? 'Neon' : 'Missing' }}</strong>
+            <span>Engine</span>
+            <strong>{{ loadingReadiness && !health ? 'Loading' : dbReady ? 'Ready' : 'Unavailable' }}</strong>
           </div>
           <div class="engine-row">
-            <span>Rule catalog</span>
-            <strong>{{ loadingReadiness && !health ? 'Checking' : rulesReady ? 'Ready' : 'Empty' }}</strong>
+            <span>Rules</span>
+            <strong>{{ loadingReadiness && !health ? 'Loading' : rulesReady ? 'Ready' : 'Empty' }}</strong>
           </div>
           <div class="engine-row">
-            <span>Rule source</span>
-            <strong>DAF seed</strong>
+            <span>Source</span>
+            <strong>Saved DAF catalog</strong>
           </div>
 
           @if (loadingReadiness && !health) {
-            <div class="alert info">Checking Neon and seeded rules.</div>
+            <div class="alert info">Preparing saved rules.</div>
           } @else if (readinessError) {
             <div class="alert bad">{{ readinessError }}</div>
           } @else if (!dbReady) {
-            <div class="alert bad">DATABASE_URL is not visible to this deployment.</div>
+            <div class="alert bad">Processing is unavailable right now. Refresh or contact support.</div>
           } @else if (!rulesReady) {
-            <div class="alert bad">No executable DB rules are available. The API will repair the seeded catalog on the next health check.</div>
+            <div class="alert bad">No runnable rules are loaded. Contact support.</div>
           } @else if (catalogLoading) {
             <div class="alert good">Ready to process. Loading catalog details in the background.</div>
           } @else {
-            <div class="alert good">Ready to process against {{ executableVariantCount }} executable rules.</div>
+            <div class="alert good">Ready to process against {{ executableVariantCount }} rules.</div>
           }
         </aside>
       </div>
@@ -463,7 +463,7 @@ export class UploadIngestComponent implements OnInit {
     try {
       this.rules = await this.api.listRules();
     } catch {
-      // Health already carries the counts needed for processing.
+      // The status endpoint already carries the counts needed for processing.
     } finally {
       this.catalogLoading = false;
     }

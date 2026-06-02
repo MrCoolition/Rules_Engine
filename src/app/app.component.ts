@@ -15,6 +15,6 @@ export class AppComponent {
     { path: '/workbench', label: 'Review Rows' },
     { path: '/reports', label: 'Buckets' },
     { path: '/rules', label: 'Rules' },
-    { path: '/settings', label: 'Settings' }
+    { path: '/settings', label: 'System' }
   ];
 }

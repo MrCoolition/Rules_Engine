@@ -11,7 +11,7 @@ import type { RuleDefinition, RuleRun, SourceBatch } from '../models';
     <section class="page-title">
       <div>
         <p>Execution Console</p>
-        <h1>Run governed rules</h1>
+        <h1>Run saved rules</h1>
       </div>
       <button class="button ghost" (click)="refresh()">Refresh</button>
     </section>
@@ -32,9 +32,9 @@ import type { RuleDefinition, RuleRun, SourceBatch } from '../models';
       </div>
 
       <div class="rule-strip">
-        <span class="tag info">{{ rules.length }} definitions</span>
-        <span class="tag good">{{ executableCount }} executable variants</span>
-        <span class="tag warn">{{ guidedCount }} guided/manual variants</span>
+        <span class="tag info">{{ rules.length }} saved rules</span>
+        <span class="tag good">{{ executableCount }} ready rules</span>
+        <span class="tag warn">{{ guidedCount }} guided/reference rules</span>
       </div>
     </section>
 
@@ -114,9 +114,9 @@ export class ExecutionConsoleComponent implements OnInit {
   }
 
   async refresh(): Promise<void> {
-    const [batches, seeded] = await Promise.all([this.api.listBatches(), this.api.seedRules(false)]);
+    const [batches, rules] = await Promise.all([this.api.listBatches(), this.api.listRules()]);
     this.batches = batches;
-    this.rules = seeded.rules;
+    this.rules = rules;
     this.selectedBatchId ||= this.batches[0]?.id ?? '';
   }
 

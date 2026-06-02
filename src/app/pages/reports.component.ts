@@ -13,7 +13,7 @@ import type { BatchSummary, SourceBatch } from '../models';
       <div>
         <p>Buckets</p>
         <h1>Compliance buckets</h1>
-        <span>Like outputs are grouped into reviewable queues after the DB rules run.</span>
+        <span>Like outputs are grouped into reviewable queues after the saved rules run.</span>
       </div>
       <div class="toolbar">
         <button class="button secondary" (click)="export('csv')" [disabled]="!selectedBatchId">CSV</button>

@@ -14,6 +14,6 @@ export const routes: Routes = [
   { path: 'workbench', component: WorkbenchComponent, title: 'Analyst Workbench' },
   { path: 'reports', component: ReportsComponent, title: 'Buckets' },
   { path: 'rules', component: RuleCatalogComponent, title: 'Rule Catalog' },
-  { path: 'settings', component: SettingsComponent, title: 'Settings' },
+  { path: 'settings', component: SettingsComponent, title: 'System' },
   { path: '**', redirectTo: '' }
 ];

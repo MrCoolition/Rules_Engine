@@ -19,17 +19,17 @@ import { hasDatabaseUrl } from './_shared/db.js';
 const manifest: RouteManifest = {
   frontendRoutes: [
     { path: '/', label: 'Compliance Rules', purpose: 'Rules readiness, recent batches, and processing entry point.' },
-    { path: '/upload', label: 'Process PRF', purpose: 'Upload a PRF/SORF/SRF workbook, run DB-backed rules, and show result buckets.' },
+    { path: '/upload', label: 'Process PRF', purpose: 'Upload a PRF/SORF/SRF workbook, run saved rules, and show result buckets.' },
     { path: '/execute', label: 'Execution Console', purpose: 'Optional run console for selected batches.' },
     { path: '/workbench', label: 'Analyst Workbench', purpose: 'Search, filter, review, and edit workflow row decisions.' },
     { path: '/reports', label: 'Buckets', purpose: 'Compliance bucket rollups, drilldowns, coverage, and CSV/XLSX export.' },
-    { path: '/rules', label: 'Rule Catalog', purpose: 'Browse and sync the DB-backed compliance rule catalog.' },
-    { path: '/settings', label: 'Settings', purpose: 'Environment health, schema bootstrap, and API route manifest.' }
+    { path: '/rules', label: 'Rule Catalog', purpose: 'Browse the saved compliance rule catalog.' },
+    { path: '/settings', label: 'System', purpose: 'Current operating status and workflow links.' }
   ],
   apiRoutes: [
-    { method: 'GET', path: '/api/health', purpose: 'Environment, database, and seeded rule readiness.' },
+    { method: 'GET', path: '/api/health', purpose: 'Rule engine status and saved rule readiness.' },
     { method: 'GET', path: '/api/routes', purpose: 'Frontend and API route manifest.' },
-    { method: 'POST', path: '/api/bootstrap', purpose: 'Create Neon schema tables and indexes.' },
+    { method: 'POST', path: '/api/bootstrap', purpose: 'Admin maintenance for storage tables and saved rules.' },
     { method: 'GET', path: '/api/batches', purpose: 'List source batches.' },
     { method: 'POST', path: '/api/batches/upload', purpose: 'Upload a PRF/SORF/SRF workbook as base64 JSON.' },
     { method: 'POST', path: '/api/batches/sample', purpose: 'Local-only sample ingestion when a workspace workbook exists.' },
@@ -40,8 +40,8 @@ const manifest: RouteManifest = {
     { method: 'POST', path: '/api/batches/:batchId/export', purpose: 'Export CSV or XLSX outcomes.' },
     { method: 'PATCH', path: '/api/rows/:rowId', purpose: 'Patch analyst-editable row fields with audit.' },
     { method: 'GET', path: '/api/rules', purpose: 'List DAF-derived rule definitions and seed the catalog if empty.' },
-    { method: 'POST', path: '/api/rules/seed', purpose: 'Seed Neon with the bundled DAF-derived rule catalog.' },
-    { method: 'POST', path: '/api/rules/import-daf', purpose: 'Admin-only rule catalog import override. Normal processing uses bundled DB rules.' },
+    { method: 'POST', path: '/api/rules/seed', purpose: 'Admin refresh for the bundled DAF-derived rule catalog.' },
+    { method: 'POST', path: '/api/rules/import-daf', purpose: 'Admin-only rule catalog import override. Normal processing uses saved rules.' },
     { method: 'GET', path: '/api/rules/:ruleId', purpose: 'Rule details, version, and variants.' },
     { method: 'POST', path: '/api/rules/:ruleId/versions', purpose: 'Create a draft version from the current rule.' },
     { method: 'PATCH', path: '/api/rules/versions/:versionId', purpose: 'Edit draft/ready version metadata and variants.' },
@@ -309,7 +309,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const { rules } = await getSeededRuleCatalog(store);
       const executableRuleCount = rules.flatMap((rule) => rule.variants).filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length;
       if (executableRuleCount === 0) {
-        throw httpError(409, 'No approved executable rules are loaded in the database.');
+        throw httpError(409, 'No runnable rules are loaded.');
       }
       const executed = executeRows(beforeRows, rules, rowIds);
       const run = createRuleRun(batchId, stringBody(body['mode']) || 'full_batch', beforeRows.length, executed.changedCount, executed.reviewCount, catalogSnapshot(rules));

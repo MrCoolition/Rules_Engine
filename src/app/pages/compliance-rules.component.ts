@@ -12,7 +12,7 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
       <div>
         <p class="eyebrow">Compliance Rules</p>
         <h1>PRF/SORF/SRF engine</h1>
-        <p class="page-copy">Upload the standard file, execute the DAF-derived DB rules, then review bucketed outcomes.</p>
+        <p class="page-copy">Upload the standard file, run the saved compliance rules, then review bucketed outcomes.</p>
       </div>
       <div class="toolbar">
         <a class="button" routerLink="/upload">Process Workbook</a>
@@ -22,25 +22,25 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
     @if (error) {
       <div class="alert bad notice">{{ error }}</div>
     } @else if (loading) {
-      <div class="alert info notice">Checking Neon and rule readiness.</div>
+      <div class="alert info notice">Loading rules and recent workbooks.</div>
     }
 
     <section class="kpi-grid">
       <article class="panel kpi">
-        <small>Database</small>
-        <strong>{{ loading && !health ? 'Checking' : dbReady ? 'Neon' : 'Missing' }}</strong>
+        <small>Engine</small>
+        <strong>{{ loading && !health ? 'Loading' : systemReady ? 'Ready' : 'Unavailable' }}</strong>
       </article>
       <article class="panel kpi">
-        <small>Batches</small>
+        <small>Workbooks</small>
         <strong>{{ batches.length }}</strong>
       </article>
       <article class="panel kpi">
         <small>Rules</small>
-        <strong>{{ loading && !health ? 'Checking' : ruleCount }}</strong>
+        <strong>{{ loading && !health ? 'Loading' : ruleCount }}</strong>
       </article>
       <article class="panel kpi">
-        <small>Executable</small>
-        <strong>{{ loading && !health ? 'Checking' : executableVariantCount }}</strong>
+        <small>Ready Rules</small>
+        <strong>{{ loading && !health ? 'Loading' : executableVariantCount }}</strong>
       </article>
     </section>
 
@@ -81,21 +81,21 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
 
       <article class="panel card-pad">
         <div class="section-title">
-          <h2>Readiness</h2>
+          <h2>Workflow Status</h2>
           <a routerLink="/rules">Rules</a>
         </div>
         <div class="readiness">
           <div>
-            <span [class]="loading && !health ? 'tag info' : dbReady ? 'tag good' : 'tag bad'">{{ loading && !health ? 'Checking database' : dbReady ? 'Neon connected' : 'No database' }}</span>
-            <p>{{ dbReady ? 'DATABASE_URL is active for persisted batches and rule execution.' : 'DATABASE_URL must be available in Vercel for persisted batches and rule execution.' }}</p>
+            <span [class]="loading && !health ? 'tag info' : systemReady ? 'tag good' : 'tag bad'">{{ loading && !health ? 'Loading status' : systemReady ? 'Ready to process' : 'Action needed' }}</span>
+            <p>{{ systemReady ? 'The rule engine is ready for workbook processing.' : 'Processing is not available right now. Refresh or contact support.' }}</p>
           </div>
           <div>
-            <span [class]="loading && !health ? 'tag info' : ruleCount ? 'tag good' : 'tag bad'">{{ loading && !health ? 'Checking rules' : 'DAF rules seeded' }}</span>
-            <p>{{ loading && !health ? 'Loading DB-backed rules.' : ruleCount + ' rule definitions are loaded from the DB catalog.' }}</p>
+            <span [class]="loading && !health ? 'tag info' : ruleCount ? 'tag good' : 'tag bad'">{{ loading && !health ? 'Loading rules' : 'Rule catalog loaded' }}</span>
+            <p>{{ loading && !health ? 'Preparing the saved compliance rules.' : ruleCount + ' saved rules are available.' }}</p>
           </div>
           <div>
-            <span [class]="loading && !health ? 'tag info' : executableVariantCount ? 'tag good' : 'tag bad'">Executable variants</span>
-            <p>{{ loading && !health ? 'Checking executable variants.' : executableVariantCount + ' approved variants can run against PRF rows.' }}</p>
+            <span [class]="loading && !health ? 'tag info' : executableVariantCount ? 'tag good' : 'tag bad'">Ready rules</span>
+            <p>{{ loading && !health ? 'Preparing rule coverage.' : executableVariantCount + ' rules are ready to run against PRF rows.' }}</p>
           </div>
         </div>
       </article>
@@ -156,6 +156,10 @@ export class ComplianceRulesComponent implements OnInit {
     return this.health?.databaseConfigured === true;
   }
 
+  get systemReady(): boolean {
+    return this.dbReady && this.ruleCount > 0 && this.executableVariantCount > 0;
+  }
+
   get ruleCount(): number {
     return this.rules.length || this.health?.ruleCount || 0;
   }
@@ -189,7 +193,7 @@ export class ComplianceRulesComponent implements OnInit {
     try {
       this.rules = await this.api.listRules();
     } catch {
-      // Health already provides the readiness counts used by this screen.
+      // The status endpoint already provides the counts used by this screen.
     } finally {
       this.catalogLoading = false;
     }
@@ -198,8 +202,8 @@ export class ComplianceRulesComponent implements OnInit {
   private errorMessage(error: unknown): string {
     if (typeof error === 'object' && error && 'error' in error) {
       const wrapped = error as { error?: { error?: string; message?: string } };
-      return wrapped.error?.error || wrapped.error?.message || 'Readiness check failed.';
+      return wrapped.error?.error || wrapped.error?.message || 'Status check failed.';
     }
-    return error instanceof Error ? error.message : 'Readiness check failed.';
+    return error instanceof Error ? error.message : 'Status check failed.';
   }
 }
