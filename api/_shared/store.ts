@@ -78,7 +78,7 @@ class MemoryStore implements RulesStore {
   }
 
   async listBatches(): Promise<SourceBatch[]> {
-    return [...this.state.batches].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return this.state.batches.filter((batch) => batch.status !== 'archived').sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   async getBatch(batchId: string): Promise<SourceBatch | null> {
@@ -189,6 +189,7 @@ class NeonStore implements RulesStore {
       `select id, name, source_kind, reporting_date, status, row_count, source_file_name,
         source_sheet_name, file_sha256, created_at, updated_at
        from source_batches
+       where status <> 'archived'
        order by created_at desc`
     );
     return rows.map(dbBatchToSourceBatch);
