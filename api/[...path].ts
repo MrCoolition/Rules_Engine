@@ -108,6 +108,7 @@ const manifest: RouteManifest = {
     { method: 'GET', path: '/api/rules', purpose: 'List saved rule definitions and seed the DAF catalog if empty.' },
     { method: 'POST', path: '/api/rules', purpose: 'Create a user-managed compliance rule.' },
     { method: 'PATCH', path: '/api/rules/:ruleId', purpose: 'Enable, disable, or update a saved rule.' },
+    { method: 'DELETE', path: '/api/rules/:ruleId', purpose: 'Archive a user-managed rule.' },
     { method: 'POST', path: '/api/rules/seed', purpose: 'Admin refresh for the bundled DAF-derived rule catalog.' },
     { method: 'POST', path: '/api/rules/import-daf', purpose: 'Admin-only rule catalog import override. Normal processing uses saved rules.' },
     { method: 'GET', path: '/api/rules/:ruleId', purpose: 'Rule details, version, and variants.' },
@@ -293,6 +294,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       await store.replaceRuleCatalog(rules);
       await store.audit('rule.updated', 'rule_definition', rule.id, { ruleId: rule.ruleId, fields: Object.keys(body) });
       sendJson(res, 200, { rule: rules[index], rules: await store.listRules() });
+      return;
+    }
+
+    if (path[0] === 'rules' && path[1] && path.length === 2 && req.method === 'DELETE') {
+      if (isBundledRuleId(path[1])) throw httpError(409, 'Bundled rules can be disabled, but not removed.');
+      const rules = await store.listRules();
+      const rule = rules.find((item) => item.ruleId === path[1]);
+      if (!rule) throw httpError(404, 'Rule not found.');
+      await store.replaceRuleCatalog(rules.filter((item) => item.ruleId !== path[1]));
+      await store.audit('rule.archived', 'rule_definition', rule.id, { ruleId: rule.ruleId });
+      sendJson(res, 200, { archived: true, rules: await store.listRules() });
       return;
     }
 
