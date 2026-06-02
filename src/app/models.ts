@@ -92,6 +92,7 @@ export interface RuleDefinition {
   ruleGroup: string;
   businessScope: string;
   requestTypes: string[];
+  notes?: string;
   status: string;
   automationLevel: string;
   variants: {
@@ -99,6 +100,7 @@ export interface RuleDefinition {
     runtimeKind: string;
     enabled: boolean;
     isExecutable: boolean;
+    stopProcessing?: boolean;
     status: string;
     automationLevel: string;
     description: string;

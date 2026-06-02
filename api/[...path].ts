@@ -288,8 +288,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const index = rules.findIndex((item) => item.ruleId === path[1]);
       if (index < 0) throw httpError(404, 'Rule not found.');
       const rule = rules[index];
-      if (body['enabled'] !== undefined) {
+      if (hasRuleEditPayload(body)) {
+        rules[index] = updateRuleFromBody(rule, body);
+      } else if (body['enabled'] !== undefined) {
         rules[index] = setRuleEnabled(rule, Boolean(body['enabled']));
+      } else {
+        throw httpError(400, 'Send rule fields or enabled status to update.');
       }
       await store.replaceRuleCatalog(rules);
       await store.audit('rule.updated', 'rule_definition', rule.id, { ruleId: rule.ruleId, fields: Object.keys(body) });
@@ -614,6 +618,94 @@ function createUserRule(body: Record<string, unknown>, existingRules: RuleDefini
     ],
     createdAt: now,
     updatedAt: now
+  };
+}
+
+function hasRuleEditPayload(body: Record<string, unknown>): boolean {
+  return ['name', 'ruleGroup', 'businessScope', 'requestTypes', 'filter', 'actions', 'stopProcessing', 'notes'].some((field) => body[field] !== undefined);
+}
+
+function updateRuleFromBody(rule: RuleDefinition, body: Record<string, unknown>): RuleDefinition {
+  const requestedRuleId = cleanRuleId(stringBody(body['ruleId']));
+  if (requestedRuleId && requestedRuleId !== rule.ruleId) throw httpError(400, 'Rule ID cannot be changed. Create a new rule for a new ID.');
+
+  const name = stringBody(body['name']).trim();
+  if (!name) throw httpError(400, 'Rule name is required.');
+  if (rule.variants.length === 0) throw httpError(400, 'This rule has no editable variant.');
+
+  const filter = recordBody(body['filter']);
+  const predicate = predicateFromFilter(filter);
+  const actionBody = recordBody(body['actions']);
+  const actions = actionsFromBody(actionBody);
+  const now = new Date().toISOString();
+  const enabled = body['enabled'] !== undefined ? Boolean(body['enabled']) : rule.status !== 'disabled';
+  const requestTypes = requestTypesFromBody(body['requestTypes']);
+  const fieldFilterLogic = filterLogicText(filter);
+  const aggregateLogic = aggregateLogicText(actions);
+  const ruleGroup = stringBody(body['ruleGroup']).trim() || rule.ruleGroup || 'User Managed';
+  const businessScope = stringBody(body['businessScope']).trim() || rule.businessScope || 'All';
+  const notes = stringBody(body['notes']).trim();
+  const primaryVariant = rule.variants[0];
+  const variantStatus = enabled ? 'approved' : 'disabled';
+
+  return {
+    ...rule,
+    name,
+    ruleGroup,
+    businessScope,
+    requestTypes,
+    notes,
+    status: enabled ? 'approved' : 'disabled',
+    automationLevel: 'alpha',
+    updatedAt: now,
+    variants: rule.variants.map((variant, index) => {
+      if (index !== 0) {
+        return enabled
+          ? variant
+          : {
+              ...variant,
+              enabled: false,
+              status: 'disabled'
+            };
+      }
+      return {
+        ...primaryVariant,
+        enabled,
+        isExecutable: true,
+        stopProcessing: Boolean(body['stopProcessing']),
+        predicateJson: predicate,
+        actionJson: actions,
+        description: fieldFilterLogic,
+        automationLevel: 'alpha',
+        status: variantStatus,
+        source: {
+          ...primaryVariant.source,
+          ruleId: rule.ruleId,
+          ruleGroup,
+          business: businessScope,
+          requestTypes: requestTypes.join(', '),
+          decisionCriteria: fieldFilterLogic,
+          action: stringBody(actionBody['action']),
+          ifInStockAction: stringBody(actionBody['ifInStockAction']),
+          buysmartAction: stringBody(actionBody['buysmartAction']),
+          setAction: aggregateLogic,
+          downstreamHandling: stringBody(actionBody['note']),
+          notes,
+          fieldFilterLogic,
+          aggregateLogic,
+          logic: `${fieldFilterLogic} => ${aggregateLogic}`,
+          compiledLogic: {
+            compilerVersion: CATALOG_COMPILER_VERSION,
+            fieldFilterLogic,
+            aggregateLogic,
+            predicateJson: predicate,
+            actionJson: actions,
+            executable: true,
+            warnings: []
+          }
+        }
+      };
+    })
   };
 }
 

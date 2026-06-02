@@ -72,6 +72,10 @@ export class ApiService {
     return this.resolve(this.http.post<{ rule: RuleDefinition; rules: RuleDefinition[] }>('/api/rules', rule));
   }
 
+  updateRule(ruleId: string, rule: RuleCreateRequest): Promise<{ rule: RuleDefinition; rules: RuleDefinition[] }> {
+    return this.resolve(this.http.patch<{ rule: RuleDefinition; rules: RuleDefinition[] }>(`/api/rules/${encodeURIComponent(ruleId)}`, rule));
+  }
+
   setRuleEnabled(ruleId: string, enabled: boolean): Promise<{ rule: RuleDefinition; rules: RuleDefinition[] }> {
     return this.resolve(this.http.patch<{ rule: RuleDefinition; rules: RuleDefinition[] }>(`/api/rules/${encodeURIComponent(ruleId)}`, { enabled }));
   }

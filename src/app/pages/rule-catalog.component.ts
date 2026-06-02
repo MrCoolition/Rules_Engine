@@ -16,7 +16,7 @@ import type { RuleCreateRequest, RuleDefinition } from '../models';
         <p class="page-copy">Saved DAF logic drives the PRF/SORF/SRF workflow.</p>
       </div>
       <div class="toolbar">
-        <button class="button" (click)="showCreate = !showCreate">{{ showCreate ? 'Close Builder' : 'New Rule' }}</button>
+        <button class="button" (click)="openCreate()">{{ showCreate ? 'Close Builder' : 'New Rule' }}</button>
         <button class="button secondary" (click)="refreshRules()" [disabled]="busy">{{ busy ? 'Refreshing' : 'Refresh Rules' }}</button>
       </div>
     </section>
@@ -25,8 +25,8 @@ import type { RuleCreateRequest, RuleDefinition } from '../models';
       <section class="panel rule-builder">
         <div class="builder-head">
           <div>
-            <h2>Create rule</h2>
-            <p>Build a saved compliance rule from a source-row filter and the actions to apply when it matches.</p>
+            <h2>{{ isEditing ? 'Edit rule' : 'Create rule' }}</h2>
+            <p>{{ isEditing ? 'Change the saved filter, actions, and run state for this rule.' : 'Build a saved compliance rule from a source-row filter and the actions to apply when it matches.' }}</p>
           </div>
           <span class="tag good">{{ draft.enabled ? 'Enabled' : 'Disabled' }}</span>
         </div>
@@ -34,7 +34,7 @@ import type { RuleCreateRequest, RuleDefinition } from '../models';
         <div class="builder-grid">
           <label class="field">
             <span>Rule ID</span>
-            <input [(ngModel)]="draft.ruleId" placeholder="Auto">
+            <input [(ngModel)]="draft.ruleId" placeholder="Auto" [disabled]="isEditing">
           </label>
           <label class="field span-2">
             <span>Name</span>
@@ -129,8 +129,8 @@ import type { RuleCreateRequest, RuleDefinition } from '../models';
         }
 
         <div class="builder-actions">
-          <button class="button" (click)="createRule()" [disabled]="saving">{{ saving ? 'Saving Rule' : 'Create Rule' }}</button>
-          <button class="button ghost" (click)="resetDraft()" [disabled]="saving">Reset</button>
+          <button class="button" (click)="saveRule()" [disabled]="saving">{{ saving ? 'Saving Rule' : isEditing ? 'Save Changes' : 'Create Rule' }}</button>
+          <button class="button ghost" (click)="resetOrCancelDraft()" [disabled]="saving">{{ isEditing ? 'Cancel' : 'Reset' }}</button>
         </div>
       </section>
     }
@@ -188,7 +188,8 @@ import type { RuleCreateRequest, RuleDefinition } from '../models';
               <b>Aggregate</b>
               <span>{{ aggregateLogic(rule) }}</span>
             </div>
-            <div>
+            <div class="manage-actions">
+              <button class="mini-button" (click)="editRule(rule)" [disabled]="busyRuleId === rule.ruleId">Edit</button>
               <button class="mini-button" (click)="toggleRule(rule)" [disabled]="busyRuleId === rule.ruleId">
                 {{ busyRuleId === rule.ruleId ? 'Saving' : isRuleDisabled(rule) ? 'Enable' : 'Disable' }}
               </button>
@@ -297,7 +298,7 @@ import type { RuleCreateRequest, RuleDefinition } from '../models';
 
       .rule-row {
         display: grid;
-        grid-template-columns: 100px 0.9fr 110px 100px minmax(260px, 1.5fr) 110px;
+        grid-template-columns: 100px 0.9fr 110px 100px minmax(260px, 1.5fr) 140px;
         gap: 0.8rem;
         align-items: start;
         padding: 0.72rem 0.9rem;
@@ -362,6 +363,11 @@ import type { RuleCreateRequest, RuleDefinition } from '../models';
         margin-bottom: 0.35rem;
       }
 
+      .manage-actions {
+        display: grid;
+        gap: 0.45rem;
+      }
+
       .mini-button {
         min-height: 2.25rem;
         width: 100%;
@@ -413,6 +419,7 @@ export class RuleCatalogComponent implements OnInit {
   busy = false;
   saving = false;
   busyRuleId = '';
+  editingRuleId = '';
   error = '';
   message = '';
   draft = this.blankDraft();
@@ -445,6 +452,8 @@ export class RuleCatalogComponent implements OnInit {
     { value: 'contains', label: 'contains' },
     { value: 'eq', label: 'equals' },
     { value: 'ne', label: 'does not equal' },
+    { value: 'in', label: 'is in' },
+    { value: 'not_in', label: 'is not in' },
     { value: 'not_contains', label: 'does not contain' },
     { value: 'blank', label: 'is blank' },
     { value: 'not_blank', label: 'is not blank' },
@@ -482,6 +491,10 @@ export class RuleCatalogComponent implements OnInit {
     const needle = this.filter.toLowerCase().trim();
     if (!needle) return this.rules;
     return this.rules.filter((rule) => JSON.stringify(rule).toLowerCase().includes(needle));
+  }
+
+  get isEditing(): boolean {
+    return Boolean(this.editingRuleId);
   }
 
   get executableCount(): number {
@@ -536,7 +549,29 @@ export class RuleCatalogComponent implements OnInit {
     }
   }
 
-  async createRule(): Promise<void> {
+  openCreate(): void {
+    if (this.showCreate) {
+      this.editingRuleId = '';
+      this.resetDraft();
+      this.showCreate = false;
+      return;
+    }
+    this.editingRuleId = '';
+    this.resetDraft();
+    this.showCreate = true;
+    this.message = '';
+    this.error = '';
+  }
+
+  editRule(rule: RuleDefinition): void {
+    this.editingRuleId = rule.ruleId;
+    this.draft = this.draftFromRule(rule);
+    this.showCreate = true;
+    this.message = '';
+    this.error = '';
+  }
+
+  async saveRule(): Promise<void> {
     this.message = '';
     this.error = '';
     if (!this.draft.name.trim()) {
@@ -549,10 +584,15 @@ export class RuleCatalogComponent implements OnInit {
     }
     this.saving = true;
     try {
-      const result = await this.api.createRule(this.requestDraft());
+      const result = this.isEditing
+        ? await this.api.updateRule(this.editingRuleId, this.requestDraft())
+        : await this.api.createRule(this.requestDraft());
       this.rules = result.rules;
-      this.message = `${result.rule.ruleId} created. ${this.executableFor(result.rule)} ready variant saved.`;
+      this.message = this.isEditing
+        ? `${result.rule.ruleId} updated. ${this.executableFor(result.rule)} ready variant saved.`
+        : `${result.rule.ruleId} created. ${this.executableFor(result.rule)} ready variant saved.`;
       this.showCreate = false;
+      this.editingRuleId = '';
       this.resetDraft();
     } catch (error) {
       this.error = this.errorMessage(error);
@@ -616,6 +656,14 @@ export class RuleCatalogComponent implements OnInit {
     this.draft = this.blankDraft();
   }
 
+  resetOrCancelDraft(): void {
+    this.resetDraft();
+    if (this.isEditing) {
+      this.editingRuleId = '';
+      this.showCreate = false;
+    }
+  }
+
   private blankDraft(): RuleCreateRequest {
     return {
       ruleId: '',
@@ -642,6 +690,75 @@ export class RuleCatalogComponent implements OnInit {
       stopProcessing: false,
       notes: ''
     };
+  }
+
+  private draftFromRule(rule: RuleDefinition): RuleCreateRequest {
+    const variant = rule.variants[0];
+    return {
+      ruleId: rule.ruleId,
+      name: rule.name,
+      ruleGroup: rule.ruleGroup || 'User Managed',
+      businessScope: rule.businessScope || 'All',
+      requestTypes: rule.requestTypes.join(', ') || 'PRF, SORF, SRF',
+      filter: this.filterFromPredicate(variant?.predicateJson),
+      actions: this.actionsFromVariant(variant?.actionJson),
+      enabled: !this.isRuleDisabled(rule),
+      stopProcessing: Boolean(variant?.stopProcessing),
+      notes: rule.notes || ''
+    };
+  }
+
+  private filterFromPredicate(value: unknown): RuleCreateRequest['filter'] {
+    const predicate = this.objectValue(value);
+    const field = this.fieldOptions.some((option) => option.value === predicate['field']) ? String(predicate['field']) : 'vendor_lc';
+    const op = this.operatorOptions.some((option) => option.value === predicate['op']) ? String(predicate['op']) : 'contains';
+    return {
+      field,
+      op,
+      value: this.draftFilterValue(predicate['value'])
+    };
+  }
+
+  private actionsFromVariant(value: unknown): RuleCreateRequest['actions'] {
+    const draft: RuleCreateRequest['actions'] = {
+      action: '',
+      ifInStockAction: '',
+      buysmartAction: '',
+      review: false,
+      validation: '',
+      note: '',
+      exclude: false,
+      excludeReason: ''
+    };
+    const actions = Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
+    for (const action of actions) {
+      const type = String(action['type'] ?? '');
+      if (type === 'exclude') {
+        draft.exclude = true;
+        draft.excludeReason = this.stringValue(action['reason']);
+      }
+      if (type === 'set_action') draft.action = this.stringValue(action['value']);
+      if (type === 'set_if_stock') draft.ifInStockAction = this.stringValue(action['value']);
+      if (type === 'set_buysmart') draft.buysmartAction = this.stringValue(action['value']);
+      if (type === 'set_review') draft.review = Boolean(action['value'] ?? true);
+      if (type === 'append_validation') draft.validation = this.stringValue(action['value']);
+      if (type === 'add_note') draft.note = this.stringValue(action['value']);
+    }
+    return draft;
+  }
+
+  private objectValue(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  }
+
+  private draftFilterValue(value: unknown): string | number | boolean {
+    if (Array.isArray(value)) return value.map((item) => this.stringValue(item)).filter(Boolean).join(', ');
+    if (typeof value === 'number' || typeof value === 'boolean') return value;
+    return this.stringValue(value);
+  }
+
+  private stringValue(value: unknown): string {
+    return value === undefined || value === null ? '' : String(value);
   }
 
   private requestDraft(): RuleCreateRequest {
