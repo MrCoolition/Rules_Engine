@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../services/api.service';
 import { READY_HEALTH } from '../services/readiness-defaults';
-import type { RuleDefinition } from '../models';
+import type { RuleCreateRequest, RuleDefinition } from '../models';
 
 @Component({
   standalone: true,
@@ -16,9 +16,124 @@ import type { RuleDefinition } from '../models';
         <p class="page-copy">Saved DAF logic drives the PRF/SORF/SRF workflow.</p>
       </div>
       <div class="toolbar">
+        <button class="button" (click)="showCreate = !showCreate">{{ showCreate ? 'Close Builder' : 'New Rule' }}</button>
         <button class="button secondary" (click)="refreshRules()" [disabled]="busy">{{ busy ? 'Refreshing' : 'Refresh Rules' }}</button>
       </div>
     </section>
+
+    @if (showCreate) {
+      <section class="panel rule-builder">
+        <div class="builder-head">
+          <div>
+            <h2>Create rule</h2>
+            <p>Build a saved compliance rule from a source-row filter and the actions to apply when it matches.</p>
+          </div>
+          <span class="tag good">{{ draft.enabled ? 'Enabled' : 'Disabled' }}</span>
+        </div>
+
+        <div class="builder-grid">
+          <label class="field">
+            <span>Rule ID</span>
+            <input [(ngModel)]="draft.ruleId" placeholder="Auto">
+          </label>
+          <label class="field span-2">
+            <span>Name</span>
+            <input [(ngModel)]="draft.name" placeholder="Route vendor exception">
+          </label>
+          <label class="field">
+            <span>Group</span>
+            <input [(ngModel)]="draft.ruleGroup" placeholder="User Managed">
+          </label>
+          <label class="field">
+            <span>Business scope</span>
+            <input [(ngModel)]="draft.businessScope" placeholder="All">
+          </label>
+          <label class="field">
+            <span>Request types</span>
+            <input [(ngModel)]="draft.requestTypes" placeholder="PRF, SORF, SRF">
+          </label>
+        </div>
+
+        <div class="builder-grid filter-grid">
+          <label class="field">
+            <span>Filter field</span>
+            <select [(ngModel)]="draft.filter.field">
+              @for (option of fieldOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="field">
+            <span>Operator</span>
+            <select [(ngModel)]="draft.filter.op">
+              @for (option of operatorOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          </label>
+          @if (operatorNeedsValue(draft.filter.op)) {
+            <label class="field span-2">
+              <span>Value</span>
+              <input [(ngModel)]="draft.filter.value" placeholder="Compass USA, Baldor, 10">
+            </label>
+          }
+        </div>
+
+        <div class="builder-grid">
+          <label class="field">
+            <span>Set ACTION</span>
+            <select [(ngModel)]="draft.actions.action">
+              @for (option of actionOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="field">
+            <span>If in stock</span>
+            <select [(ngModel)]="draft.actions.ifInStockAction">
+              @for (option of ifStockOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="field">
+            <span>BuySmart</span>
+            <select [(ngModel)]="draft.actions.buysmartAction">
+              @for (option of buysmartOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="field span-2">
+            <span>Validation</span>
+            <input [(ngModel)]="draft.actions.validation" placeholder="Missing identifier, manual review, policy exception">
+          </label>
+          <label class="field span-2">
+            <span>Note</span>
+            <input [(ngModel)]="draft.actions.note" placeholder="Optional analyst note">
+          </label>
+        </div>
+
+        <div class="builder-switches">
+          <label><input type="checkbox" [(ngModel)]="draft.actions.review"> Flag for review</label>
+          <label><input type="checkbox" [(ngModel)]="draft.actions.exclude"> Exclude matched rows</label>
+          <label><input type="checkbox" [(ngModel)]="draft.stopProcessing"> Stop after match</label>
+          <label><input type="checkbox" [(ngModel)]="draft.enabled"> Enabled</label>
+        </div>
+
+        @if (draft.actions.exclude) {
+          <label class="field exclude-reason">
+            <span>Exclude reason</span>
+            <input [(ngModel)]="draft.actions.excludeReason" placeholder="Removed from managed workflow">
+          </label>
+        }
+
+        <div class="builder-actions">
+          <button class="button" (click)="createRule()" [disabled]="saving">{{ saving ? 'Saving Rule' : 'Create Rule' }}</button>
+          <button class="button ghost" (click)="resetDraft()" [disabled]="saving">Reset</button>
+        </div>
+      </section>
+    }
 
     <section class="panel catalog-tools">
       <label class="field">
@@ -48,9 +163,10 @@ import type { RuleDefinition } from '../models';
           <span>Runs</span>
           <span>Status</span>
           <span>Logic</span>
+          <span>Manage</span>
         </div>
         @for (rule of filteredRules; track rule.ruleId) {
-          <div class="rule-row">
+          <div class="rule-row" [class.disabled-rule]="isRuleDisabled(rule)">
             <div>
               <strong>{{ rule.ruleId }}</strong>
               <small>{{ rule.ruleGroup || 'Ungrouped' }}</small>
@@ -64,13 +180,18 @@ import type { RuleDefinition } from '../models';
               <small>{{ rule.variants.length }} total</small>
             </div>
             <div>
-              <span [class]="rule.automationLevel === 'alpha' ? 'tag good' : rule.automationLevel === 'guided' ? 'tag warn' : 'tag info'">{{ automationLabel(rule) }}</span>
+              <span [class]="statusClass(rule)">{{ automationLabel(rule) }}</span>
             </div>
             <div class="logic-cell">
               <b>Filter</b>
               <span>{{ fieldFilter(rule) }}</span>
               <b>Aggregate</b>
               <span>{{ aggregateLogic(rule) }}</span>
+            </div>
+            <div>
+              <button class="mini-button" (click)="toggleRule(rule)" [disabled]="busyRuleId === rule.ruleId">
+                {{ busyRuleId === rule.ruleId ? 'Saving' : isRuleDisabled(rule) ? 'Enable' : 'Disable' }}
+              </button>
             </div>
           </div>
         } @empty {
@@ -94,6 +215,71 @@ import type { RuleDefinition } from '../models';
         flex: 1 1 320px;
       }
 
+      .rule-builder {
+        display: grid;
+        gap: 0.9rem;
+        margin-bottom: 0.9rem;
+        padding: 1rem;
+      }
+
+      .builder-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        align-items: start;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .builder-head h2,
+      .builder-head p {
+        margin: 0;
+      }
+
+      .builder-head h2 {
+        font-size: 1rem;
+      }
+
+      .builder-head p {
+        margin-top: 0.22rem;
+        color: var(--muted);
+      }
+
+      .builder-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.75rem;
+      }
+
+      .span-2 {
+        grid-column: span 2;
+      }
+
+      .builder-switches {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1rem;
+        align-items: center;
+        color: var(--ink);
+        font-weight: 760;
+      }
+
+      .builder-switches label {
+        display: inline-flex;
+        gap: 0.42rem;
+        align-items: center;
+      }
+
+      .exclude-reason {
+        max-width: 620px;
+      }
+
+      .builder-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+      }
+
       .rule-totals {
         display: flex;
         flex-wrap: wrap;
@@ -111,7 +297,7 @@ import type { RuleDefinition } from '../models';
 
       .rule-row {
         display: grid;
-        grid-template-columns: 110px 1fr 130px 110px minmax(280px, 1.7fr);
+        grid-template-columns: 100px 0.9fr 110px 100px minmax(260px, 1.5fr) 110px;
         gap: 0.8rem;
         align-items: start;
         padding: 0.72rem 0.9rem;
@@ -125,6 +311,11 @@ import type { RuleDefinition } from '../models';
 
       .rule-row:hover:not(.table-head) {
         background: #f8fafc;
+      }
+
+      .disabled-rule {
+        background: #fbfcfd;
+        color: #6b7280;
       }
 
       .table-head {
@@ -171,6 +362,26 @@ import type { RuleDefinition } from '../models';
         margin-bottom: 0.35rem;
       }
 
+      .mini-button {
+        min-height: 2.25rem;
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+        color: var(--ink);
+        font-weight: 850;
+        cursor: pointer;
+      }
+
+      .mini-button:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+
+      .mini-button:disabled {
+        opacity: 0.58;
+        cursor: not-allowed;
+      }
+
       @media (max-width: 1100px) {
         .rules-table {
           overflow-x: auto;
@@ -180,17 +391,92 @@ import type { RuleDefinition } from '../models';
           min-width: 920px;
         }
       }
+
+      @media (max-width: 900px) {
+        .builder-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .span-2 {
+          grid-column: auto;
+        }
+      }
     `
   ]
 })
 export class RuleCatalogComponent implements OnInit {
   private readonly api = inject(ApiService);
   rules: RuleDefinition[] = [];
+  showCreate = false;
   filter = '';
   loading = true;
   busy = false;
+  saving = false;
+  busyRuleId = '';
   error = '';
   message = '';
+  draft = this.blankDraft();
+  readonly fieldOptions = [
+    { value: 'business_key', label: 'Business' },
+    { value: 'request_type_key', label: 'Request type' },
+    { value: 'vendor_lc', label: 'Vendor' },
+    { value: 'din_lc', label: 'DIN' },
+    { value: 'min_lc', label: 'MIN' },
+    { value: 'manufacturer_lc', label: 'Manufacturer' },
+    { value: 'brand_lc', label: 'Brand' },
+    { value: 'description_lc', label: 'Description' },
+    { value: 'parent_category_lc', label: 'Parent category' },
+    { value: 'subcategory_lc', label: 'Sub category' },
+    { value: 'usage_num', label: 'Usage' },
+    { value: 'meets_criteria_num', label: 'Meets criteria' },
+    { value: 'current_action_key', label: 'Current ACTION' },
+    { value: 'current_buysmart_key', label: 'Current BuySmart' },
+    { value: 'is_compass', label: 'Compass USA' },
+    { value: 'is_canada', label: 'Compass Canada' },
+    { value: 'is_prf', label: 'PRF' },
+    { value: 'is_sorf', label: 'SORF' },
+    { value: 'is_srf', label: 'SRF' },
+    { value: 'is_one_time', label: 'One-time request' },
+    { value: 'is_permanent', label: 'Permanent request' },
+    { value: 'is_pantry', label: 'Pantry/APL' },
+    { value: 'is_in_catalog', label: 'In catalog' }
+  ];
+  readonly operatorOptions = [
+    { value: 'contains', label: 'contains' },
+    { value: 'eq', label: 'equals' },
+    { value: 'ne', label: 'does not equal' },
+    { value: 'not_contains', label: 'does not contain' },
+    { value: 'blank', label: 'is blank' },
+    { value: 'not_blank', label: 'is not blank' },
+    { value: 'gt', label: '>' },
+    { value: 'ge', label: '>=' },
+    { value: 'lt', label: '<' },
+    { value: 'le', label: '<=' },
+    { value: 'is_true', label: 'is true' },
+    { value: 'is_false', label: 'is false' }
+  ];
+  readonly actionOptions = [
+    { value: '', label: 'No change' },
+    { value: 'OK', label: 'OK' },
+    { value: '1X', label: '1X' },
+    { value: 'Use Right', label: 'Use Right' },
+    { value: 'Find Alt First', label: 'Find Alt First' },
+    { value: 'Cannot Add', label: 'Cannot Add' },
+    { value: 'Invalid Information', label: 'Invalid Information' },
+    { value: 'Review', label: 'Review' }
+  ];
+  readonly ifStockOptions = [
+    { value: '', label: 'No change' },
+    { value: 'OK', label: 'OK' },
+    { value: 'Review', label: 'Review' }
+  ];
+  readonly buysmartOptions = [
+    { value: '', label: 'No change' },
+    { value: 'Approved', label: 'Approved' },
+    { value: 'Denied', label: 'Denied' },
+    { value: 'Assigned', label: 'Assigned' },
+    { value: 'Review', label: 'Review' }
+  ];
 
   get filteredRules(): RuleDefinition[] {
     const needle = this.filter.toLowerCase().trim();
@@ -250,6 +536,47 @@ export class RuleCatalogComponent implements OnInit {
     }
   }
 
+  async createRule(): Promise<void> {
+    this.message = '';
+    this.error = '';
+    if (!this.draft.name.trim()) {
+      this.error = 'Rule name is required.';
+      return;
+    }
+    if (!this.hasDraftAction()) {
+      this.error = 'Add at least one action before saving the rule.';
+      return;
+    }
+    this.saving = true;
+    try {
+      const result = await this.api.createRule(this.requestDraft());
+      this.rules = result.rules;
+      this.message = `${result.rule.ruleId} created. ${this.executableFor(result.rule)} ready variant saved.`;
+      this.showCreate = false;
+      this.resetDraft();
+    } catch (error) {
+      this.error = this.errorMessage(error);
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  async toggleRule(rule: RuleDefinition): Promise<void> {
+    this.busyRuleId = rule.ruleId;
+    this.message = '';
+    this.error = '';
+    try {
+      const enable = this.isRuleDisabled(rule);
+      const result = await this.api.setRuleEnabled(rule.ruleId, enable);
+      this.rules = result.rules;
+      this.message = `${rule.ruleId} ${enable ? 'enabled' : 'disabled'}.`;
+    } catch (error) {
+      this.error = this.errorMessage(error);
+    } finally {
+      this.busyRuleId = '';
+    }
+  }
+
   executableFor(rule: RuleDefinition): number {
     return rule.variants.filter((variant) => variant.enabled && variant.isExecutable && variant.status === 'approved').length;
   }
@@ -263,10 +590,69 @@ export class RuleCatalogComponent implements OnInit {
   }
 
   automationLabel(rule: RuleDefinition): string {
+    if (this.isRuleDisabled(rule)) return 'Disabled';
     if (rule.automationLevel === 'alpha') return 'Ready';
     if (rule.automationLevel === 'guided') return 'Guided';
     if (rule.automationLevel === 'manual') return 'Manual';
     return 'Reference';
+  }
+
+  statusClass(rule: RuleDefinition): string {
+    if (this.isRuleDisabled(rule)) return 'tag bad';
+    if (rule.automationLevel === 'alpha') return 'tag good';
+    if (rule.automationLevel === 'guided') return 'tag warn';
+    return 'tag info';
+  }
+
+  isRuleDisabled(rule: RuleDefinition): boolean {
+    return rule.status === 'disabled' || rule.variants.every((variant) => !variant.enabled || variant.status === 'disabled');
+  }
+
+  operatorNeedsValue(op: string): boolean {
+    return !['blank', 'not_blank', 'is_true', 'is_false'].includes(op);
+  }
+
+  resetDraft(): void {
+    this.draft = this.blankDraft();
+  }
+
+  private blankDraft(): RuleCreateRequest {
+    return {
+      ruleId: '',
+      name: '',
+      ruleGroup: 'User Managed',
+      businessScope: 'All',
+      requestTypes: 'PRF, SORF, SRF',
+      filter: {
+        field: 'vendor_lc',
+        op: 'contains',
+        value: ''
+      },
+      actions: {
+        action: '',
+        ifInStockAction: '',
+        buysmartAction: 'Review',
+        review: true,
+        validation: '',
+        note: '',
+        exclude: false,
+        excludeReason: ''
+      },
+      enabled: true,
+      stopProcessing: false,
+      notes: ''
+    };
+  }
+
+  private requestDraft(): RuleCreateRequest {
+    const draft = structuredClone(this.draft);
+    if (!this.operatorNeedsValue(draft.filter.op)) draft.filter.value = '';
+    return draft;
+  }
+
+  private hasDraftAction(): boolean {
+    const actions = this.draft.actions;
+    return Boolean(actions.action || actions.ifInStockAction || actions.buysmartAction || actions.review || actions.validation || actions.note || actions.exclude);
   }
 
   private errorMessage(error: unknown): string {

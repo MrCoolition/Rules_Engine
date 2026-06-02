@@ -10,11 +10,77 @@ import {
   executeRows,
   summarizeBatch
 } from './_shared/engine.js';
-import type { JsonValue, RouteManifest, RowExecutionResult, RuleDefinition, RuleImportReport, RuleRun, WorkflowRow } from './_shared/types.js';
+import type { JsonValue, Predicate, RouteManifest, RowExecutionResult, RuleAction, RuleDefinition, RuleImportReport, RuleRun, WorkflowRow } from './_shared/types.js';
 import { createWorkflowRow } from './_shared/normalize.js';
 import { DEFAULT_DAF_FILE, DEFAULT_SOURCE_FILE, loadWorkbookFile, parseDafWorkbook, parseSourceWorkbook, workbookExists } from './_shared/workbooks.js';
 import { getStore, newId } from './_shared/store.js';
 import { hasDatabaseUrl } from './_shared/db.js';
+
+type PredicateOperator = Extract<Predicate, { field: string }>['op'];
+
+const ALLOWED_FILTER_FIELDS = new Map<string, string>([
+  ['business_key', 'Business'],
+  ['request_type_key', 'Request type'],
+  ['vendor_lc', 'Vendor'],
+  ['din_lc', 'DIN'],
+  ['min_lc', 'MIN'],
+  ['manufacturer_lc', 'Manufacturer'],
+  ['brand_lc', 'Brand'],
+  ['description_lc', 'Description'],
+  ['parent_category_lc', 'Parent category'],
+  ['subcategory_lc', 'Sub category'],
+  ['usage_num', 'Usage'],
+  ['meets_criteria_num', 'Meets criteria'],
+  ['current_action_key', 'Current ACTION'],
+  ['current_buysmart_key', 'Current BuySmart action'],
+  ['is_compass', 'Compass USA'],
+  ['is_canada', 'Compass Canada'],
+  ['is_healthtrust', 'HealthTrust'],
+  ['is_hmshost', 'HMSHost'],
+  ['is_prf', 'PRF'],
+  ['is_sorf', 'SORF'],
+  ['is_srf', 'SRF'],
+  ['is_one_time', 'One-time request'],
+  ['is_permanent', 'Permanent request'],
+  ['is_pantry', 'Pantry/APL'],
+  ['is_in_catalog', 'In catalog']
+]);
+
+const ALLOWED_OPERATORS = new Set<PredicateOperator>([
+  'eq',
+  'ne',
+  'in',
+  'not_in',
+  'contains',
+  'not_contains',
+  'blank',
+  'not_blank',
+  'gt',
+  'ge',
+  'lt',
+  'le',
+  'is_true',
+  'is_false'
+]);
+
+const NO_VALUE_OPERATORS = new Set<string>(['blank', 'not_blank', 'is_true', 'is_false']);
+const NUMERIC_OPERATORS = new Set<string>(['gt', 'ge', 'lt', 'le']);
+const OPERATOR_LABELS = new Map<string, string>([
+  ['eq', 'equals'],
+  ['ne', 'does not equal'],
+  ['in', 'is in'],
+  ['not_in', 'is not in'],
+  ['contains', 'contains'],
+  ['not_contains', 'does not contain'],
+  ['blank', 'is blank'],
+  ['not_blank', 'is not blank'],
+  ['gt', '>'],
+  ['ge', '>='],
+  ['lt', '<'],
+  ['le', '<='],
+  ['is_true', 'is true'],
+  ['is_false', 'is false']
+]);
 
 const manifest: RouteManifest = {
   frontendRoutes: [
@@ -39,7 +105,9 @@ const manifest: RouteManifest = {
     { method: 'GET', path: '/api/batches/:batchId/summary', purpose: 'Batch KPI, compliance buckets, and chart-ready summary.' },
     { method: 'POST', path: '/api/batches/:batchId/export', purpose: 'Export CSV or XLSX outcomes.' },
     { method: 'PATCH', path: '/api/rows/:rowId', purpose: 'Patch analyst-editable row fields with audit.' },
-    { method: 'GET', path: '/api/rules', purpose: 'List DAF-derived rule definitions and seed the catalog if empty.' },
+    { method: 'GET', path: '/api/rules', purpose: 'List saved rule definitions and seed the DAF catalog if empty.' },
+    { method: 'POST', path: '/api/rules', purpose: 'Create a user-managed compliance rule.' },
+    { method: 'PATCH', path: '/api/rules/:ruleId', purpose: 'Enable, disable, or update a saved rule.' },
     { method: 'POST', path: '/api/rules/seed', purpose: 'Admin refresh for the bundled DAF-derived rule catalog.' },
     { method: 'POST', path: '/api/rules/import-daf', purpose: 'Admin-only rule catalog import override. Normal processing uses saved rules.' },
     { method: 'GET', path: '/api/rules/:ruleId', purpose: 'Rule details, version, and variants.' },
@@ -185,6 +253,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
+    if (req.method === 'POST' && pathEquals(path, 'rules')) {
+      const seededCatalog = await getSeededRuleCatalog(store);
+      const rule = createUserRule(await readJson(req), seededCatalog.rules);
+      await store.replaceRuleCatalog([...seededCatalog.rules, rule]);
+      await store.audit('rule.created', 'rule_definition', rule.id, { ruleId: rule.ruleId, name: rule.name });
+      sendJson(res, 201, { rule, rules: await store.listRules() });
+      return;
+    }
+
     if (req.method === 'POST' && pathEquals(path, 'rules', 'seed')) {
       const body = await readJson(req, true);
       const seededCatalog = await getSeededRuleCatalog(store, Boolean(body['force']));
@@ -201,6 +278,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const { rules, report } = buildRuleCatalog(parsed);
       await store.replaceRuleCatalog(rules);
       sendJson(res, 200, { report, rules });
+      return;
+    }
+
+    if (path[0] === 'rules' && path[1] && path.length === 2 && req.method === 'PATCH') {
+      const body = await readJson(req);
+      const rules = await store.listRules();
+      const index = rules.findIndex((item) => item.ruleId === path[1]);
+      if (index < 0) throw httpError(404, 'Rule not found.');
+      const rule = rules[index];
+      if (body['enabled'] !== undefined) {
+        rules[index] = setRuleEnabled(rule, Boolean(body['enabled']));
+      }
+      await store.replaceRuleCatalog(rules);
+      await store.audit('rule.updated', 'rule_definition', rule.id, { ruleId: rule.ruleId, fields: Object.keys(body) });
+      sendJson(res, 200, { rule: rules[index], rules: await store.listRules() });
       return;
     }
 
@@ -363,15 +455,16 @@ async function getSeededRuleCatalog(
 
   if (!force) await store.bootstrap();
   const { rules, report } = buildRuleCatalog(DEFAULT_DAF_PARSED_WORKBOOK);
+  const mergedRules = [...rules, ...customRulesFrom(existingRules)];
   try {
-    await store.replaceRuleCatalog(rules);
+    await store.replaceRuleCatalog(mergedRules);
     await store.audit('rules.seeded', 'rule_catalog', null, {
       source: DEFAULT_DAF_PARSED_WORKBOOK.fileName,
       force,
-      ruleCount: rules.length,
-      executableVariantCount: report.executableVariants
+      ruleCount: mergedRules.length,
+      executableVariantCount: reportFromRules(mergedRules).executableVariants
     });
-    return { rules, report, seeded: true };
+    return { rules: mergedRules, report: reportFromRules(mergedRules), seeded: true };
   } catch (error) {
     const recoveredRules = await store.listRules().catch(() => []);
     if (recoveredRules.length > 0) return { rules: recoveredRules, report: reportFromRules(recoveredRules), seeded: false };
@@ -380,10 +473,22 @@ async function getSeededRuleCatalog(
 }
 
 function catalogNeedsRefresh(rules: RuleDefinition[]): boolean {
-  const variants = rules.flatMap((rule) => rule.variants);
-  const bundledRuleCount = new Set(DEFAULT_DAF_PARSED_WORKBOOK.logicRows.map((row) => row.ruleId)).size;
-  if (rules.length !== bundledRuleCount || variants.length === 0) return true;
+  const bundledRules = rules.filter((rule) => isBundledRuleId(rule.ruleId));
+  const variants = bundledRules.flatMap((rule) => rule.variants);
+  if (bundledRules.length !== bundledRuleIds().size || variants.length === 0) return true;
   return variants.some((variant) => variant.source.compiledLogic?.compilerVersion !== CATALOG_COMPILER_VERSION);
+}
+
+function customRulesFrom(rules: RuleDefinition[]): RuleDefinition[] {
+  return rules.filter((rule) => !isBundledRuleId(rule.ruleId));
+}
+
+function isBundledRuleId(ruleId: string): boolean {
+  return bundledRuleIds().has(ruleId);
+}
+
+function bundledRuleIds(): Set<string> {
+  return new Set(DEFAULT_DAF_PARSED_WORKBOOK.logicRows.map((row) => row.ruleId));
 }
 
 async function listRulesWithSchemaRepair(store: ReturnType<typeof getStore>): Promise<RuleDefinition[]> {
@@ -408,6 +513,204 @@ function reportFromRules(rules: RuleDefinition[]): RuleImportReport {
     guidedVariants: variants.filter((variant) => variant.automationLevel === 'guided').length,
     manualVariants: variants.filter((variant) => variant.automationLevel === 'manual' || variant.automationLevel === 'future').length
   };
+}
+
+function createUserRule(body: Record<string, unknown>, existingRules: RuleDefinition[]): RuleDefinition {
+  const ruleId = cleanRuleId(stringBody(body['ruleId'])) || nextUserRuleId(existingRules);
+  if (existingRules.some((rule) => rule.ruleId === ruleId)) throw httpError(409, `Rule ${ruleId} already exists.`);
+
+  const name = stringBody(body['name']).trim();
+  if (!name) throw httpError(400, 'Rule name is required.');
+
+  const filter = recordBody(body['filter']);
+  const predicate = predicateFromFilter(filter);
+  const actionBody = recordBody(body['actions']);
+  const actions = actionsFromBody(actionBody);
+  const now = new Date().toISOString();
+  const enabled = body['enabled'] !== false;
+  const definitionId = newId();
+  const versionId = newId();
+  const variantId = newId();
+  const requestTypes = requestTypesFromBody(body['requestTypes']);
+  const fieldFilterLogic = filterLogicText(filter);
+  const aggregateLogic = aggregateLogicText(actions);
+  const executionPriority = Math.max(
+    900000,
+    ...existingRules.flatMap((rule) => rule.variants.map((variant) => variant.executionPriority + 10))
+  );
+
+  return {
+    id: definitionId,
+    ruleId,
+    name,
+    ruleGroup: stringBody(body['ruleGroup']).trim() || 'User Managed',
+    businessScope: stringBody(body['businessScope']).trim() || 'All',
+    requestTypes,
+    discoveryReference: 'Created in Compliance Rules',
+    notes: stringBody(body['notes']).trim(),
+    ownerTeam: 'Compliance Operations',
+    versionId,
+    versionNumber: 1,
+    status: enabled ? 'approved' : 'disabled',
+    automationLevel: 'alpha',
+    variants: [
+      {
+        id: variantId,
+        ruleDefinitionId: definitionId,
+        ruleVersionId: versionId,
+        ruleId,
+        runtimeRuleId: `${ruleId}.01`,
+        runtimeKind: 'row_rule',
+        executionPriority,
+        enabled,
+        isExecutable: true,
+        stopProcessing: Boolean(body['stopProcessing']),
+        predicateJson: predicate,
+        actionJson: actions,
+        description: fieldFilterLogic,
+        automationLevel: 'alpha',
+        status: enabled ? 'approved' : 'disabled',
+        source: {
+          ruleId,
+          ruleGroup: stringBody(body['ruleGroup']).trim() || 'User Managed',
+          business: stringBody(body['businessScope']).trim() || 'All',
+          requestTypes: requestTypes.join(', '),
+          decisionCriteria: fieldFilterLogic,
+          action: stringBody(actionBody['action']),
+          ifInStockAction: stringBody(actionBody['ifInStockAction']),
+          buysmartAction: stringBody(actionBody['buysmartAction']),
+          dailyActionFileColumns: '',
+          setAction: aggregateLogic,
+          downstreamHandling: stringBody(actionBody['note']),
+          discoveryReference: 'Created in Compliance Rules',
+          notes: stringBody(body['notes']),
+          sourceRowNumber: 0,
+          fieldFilterLogic,
+          aggregateLogic,
+          logic: `${fieldFilterLogic} => ${aggregateLogic}`,
+          compiledLogic: {
+            compilerVersion: CATALOG_COMPILER_VERSION,
+            fieldFilterLogic,
+            aggregateLogic,
+            predicateJson: predicate,
+            actionJson: actions,
+            executable: true,
+            warnings: []
+          }
+        }
+      }
+    ],
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function setRuleEnabled(rule: RuleDefinition, enabled: boolean): RuleDefinition {
+  const now = new Date().toISOString();
+  const hasExecutableVariant = rule.variants.some((variant) => variant.isExecutable);
+  const status = enabled ? (hasExecutableVariant ? 'approved' : 'ready') : 'disabled';
+  return {
+    ...rule,
+    status,
+    updatedAt: now,
+    variants: rule.variants.map((variant) => ({
+      ...variant,
+      enabled: enabled && variant.isExecutable,
+      status: enabled ? (variant.isExecutable ? 'approved' : 'ready') : 'disabled'
+    }))
+  };
+}
+
+function predicateFromFilter(filter: Record<string, unknown>): Predicate {
+  const field = stringBody(filter['field']).trim();
+  const op = stringBody(filter['op']).trim() as PredicateOperator;
+  if (!ALLOWED_FILTER_FIELDS.has(field)) throw httpError(400, 'Choose a supported filter field.');
+  if (!ALLOWED_OPERATORS.has(String(op))) throw httpError(400, 'Choose a supported filter operator.');
+  if (NO_VALUE_OPERATORS.has(String(op))) return { field, op } as Predicate;
+
+  const value = filterValueForOperator(String(op), filter['value']);
+  if (value === '') throw httpError(400, 'Filter value is required.');
+  return { field, op, value } as Predicate;
+}
+
+function actionsFromBody(body: Record<string, unknown>): RuleAction[] {
+  const actions: RuleAction[] = [];
+  const action = stringBody(body['action']).trim();
+  const ifInStockAction = stringBody(body['ifInStockAction']).trim();
+  const buysmartAction = stringBody(body['buysmartAction']).trim();
+  const validation = stringBody(body['validation']).trim();
+  const note = stringBody(body['note']).trim();
+
+  if (Boolean(body['exclude'])) actions.push({ type: 'exclude', reason: stringBody(body['excludeReason']).trim() || 'User-managed exclusion rule' });
+  if (action) actions.push({ type: 'set_action', value: action });
+  if (ifInStockAction) actions.push({ type: 'set_if_stock', value: ifInStockAction });
+  if (buysmartAction) actions.push({ type: 'set_buysmart', value: buysmartAction });
+  if (Boolean(body['review'])) actions.push({ type: 'set_review', value: true });
+  if (validation) actions.push({ type: 'append_validation', value: validation });
+  if (note) actions.push({ type: 'add_note', value: note });
+  if (actions.length === 0) throw httpError(400, 'Add at least one rule action.');
+  return actions;
+}
+
+function filterValueForOperator(op: string, value: unknown): JsonValue {
+  if (NUMERIC_OPERATORS.has(op)) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) throw httpError(400, 'Filter value must be a number.');
+    return parsed;
+  }
+  if (op === 'in' || op === 'not_in') {
+    return stringBody(value)
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return stringBody(value).trim();
+}
+
+function filterLogicText(filter: Record<string, unknown>): string {
+  const field = ALLOWED_FILTER_FIELDS.get(stringBody(filter['field'])) ?? stringBody(filter['field']);
+  const op = OPERATOR_LABELS.get(stringBody(filter['op'])) ?? stringBody(filter['op']);
+  if (NO_VALUE_OPERATORS.has(stringBody(filter['op']))) return `${field} ${op}`;
+  return `${field} ${op} ${stringBody(filter['value']).trim()}`;
+}
+
+function aggregateLogicText(actions: RuleAction[]): string {
+  return actions
+    .map((action) => {
+      if (action.type === 'exclude') return `Exclude: ${action.reason ?? 'matched row'}`;
+      if (action.type === 'set_review') return 'Flag for review';
+      if (action.type === 'append_validation') return `Validation: ${stringBody(action.value)}`;
+      if (action.type === 'add_note') return `Note: ${stringBody(action.value)}`;
+      if (action.type === 'set_action') return `Set ACTION: ${stringBody(action.value)}`;
+      if (action.type === 'set_if_stock') return `Set If In Stock: ${stringBody(action.value)}`;
+      if (action.type === 'set_buysmart') return `Set BuySmart: ${stringBody(action.value)}`;
+      return action.type;
+    })
+    .join(' | ');
+}
+
+function requestTypesFromBody(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(stringBody).map((item) => item.trim()).filter(Boolean);
+  return stringBody(value)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function cleanRuleId(value: string): string {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+}
+
+function nextUserRuleId(rules: RuleDefinition[]): string {
+  const max = rules.reduce((highest, rule) => {
+    const match = /^U(\d+)$/i.exec(rule.ruleId);
+    return match ? Math.max(highest, Number(match[1])) : highest;
+  }, 0);
+  return `U${String(max + 1).padStart(3, '0')}`;
+}
+
+function recordBody(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function createRuleRun(

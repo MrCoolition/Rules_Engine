@@ -119,6 +119,32 @@ export interface RuleDefinition {
   }[];
 }
 
+export interface RuleCreateRequest {
+  ruleId?: string;
+  name: string;
+  ruleGroup: string;
+  businessScope: string;
+  requestTypes: string;
+  filter: {
+    field: string;
+    op: string;
+    value: string | number | boolean;
+  };
+  actions: {
+    action?: string;
+    ifInStockAction?: string;
+    buysmartAction?: string;
+    review?: boolean;
+    validation?: string;
+    note?: string;
+    exclude?: boolean;
+    excludeReason?: string;
+  };
+  enabled: boolean;
+  stopProcessing: boolean;
+  notes?: string;
+}
+
 export interface RouteManifest {
   frontendRoutes: { path: string; label: string; purpose: string }[];
   apiRoutes: { method: string; path: string; purpose: string }[];

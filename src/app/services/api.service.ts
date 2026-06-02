@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom, timeout, type Observable } from 'rxjs';
-import type { BatchSummary, HealthResponse, RouteManifest, RuleDefinition, RuleRun, SourceBatch, WorkflowRow } from '../models';
+import type { BatchSummary, HealthResponse, RouteManifest, RuleCreateRequest, RuleDefinition, RuleRun, SourceBatch, WorkflowRow } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -66,6 +66,14 @@ export class ApiService {
 
   listRules(): Promise<RuleDefinition[]> {
     return this.resolve(this.http.get<{ rules: RuleDefinition[] }>('/api/rules')).then((res) => res.rules);
+  }
+
+  createRule(rule: RuleCreateRequest): Promise<{ rule: RuleDefinition; rules: RuleDefinition[] }> {
+    return this.resolve(this.http.post<{ rule: RuleDefinition; rules: RuleDefinition[] }>('/api/rules', rule));
+  }
+
+  setRuleEnabled(ruleId: string, enabled: boolean): Promise<{ rule: RuleDefinition; rules: RuleDefinition[] }> {
+    return this.resolve(this.http.patch<{ rule: RuleDefinition; rules: RuleDefinition[] }>(`/api/rules/${encodeURIComponent(ruleId)}`, { enabled }));
   }
 
   importDefaultDaf(): Promise<{ report: Record<string, unknown>; rules: RuleDefinition[] }> {
