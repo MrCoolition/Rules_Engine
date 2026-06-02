@@ -1,45 +1,48 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout, type Observable } from 'rxjs';
 import type { BatchSummary, HealthResponse, RouteManifest, RuleDefinition, RuleRun, SourceBatch, WorkflowRow } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly http = inject(HttpClient);
+  private readonly statusTimeoutMs = 8000;
+  private readonly workTimeoutMs = 120000;
 
   health(): Promise<HealthResponse> {
-    return firstValueFrom(this.http.get<HealthResponse>('/api/health'));
+    return this.resolve(this.http.get<HealthResponse>('/api/health'));
   }
 
   routes(): Promise<RouteManifest> {
-    return firstValueFrom(this.http.get<RouteManifest>('/api/routes'));
+    return this.resolve(this.http.get<RouteManifest>('/api/routes'));
   }
 
   bootstrap(): Promise<{ ok: boolean; statements: number; rulesSeeded?: boolean; ruleCount?: number; executableVariantCount?: number }> {
-    return firstValueFrom(this.http.post<{ ok: boolean; statements: number; rulesSeeded?: boolean; ruleCount?: number; executableVariantCount?: number }>('/api/bootstrap', {}));
+    return this.resolve(this.http.post<{ ok: boolean; statements: number; rulesSeeded?: boolean; ruleCount?: number; executableVariantCount?: number }>('/api/bootstrap', {}));
   }
 
   listBatches(): Promise<SourceBatch[]> {
-    return firstValueFrom(this.http.get<{ batches: SourceBatch[] }>('/api/batches')).then((res) => res.batches);
+    return this.resolve(this.http.get<{ batches: SourceBatch[] }>('/api/batches')).then((res) => res.batches);
   }
 
   getBatch(batchId: string): Promise<SourceBatch> {
-    return firstValueFrom(this.http.get<{ batch: SourceBatch }>(`/api/batches/${batchId}`)).then((res) => res.batch);
+    return this.resolve(this.http.get<{ batch: SourceBatch }>(`/api/batches/${batchId}`)).then((res) => res.batch);
   }
 
   ingestSample(name?: string): Promise<{ batchId: string; rowCount: number; warnings: string[] }> {
-    return firstValueFrom(this.http.post<{ batchId: string; rowCount: number; warnings: string[] }>('/api/batches/sample', { name }));
+    return this.resolve(this.http.post<{ batchId: string; rowCount: number; warnings: string[] }>('/api/batches/sample', { name }), this.workTimeoutMs);
   }
 
   uploadWorkbook(file: File, reportingDate: string, name: string): Promise<{ batchId: string; rowCount: number; warnings: string[] }> {
     return this.fileToBase64(file).then((fileBase64) =>
-      firstValueFrom(
+      this.resolve(
         this.http.post<{ batchId: string; rowCount: number; warnings: string[] }>('/api/batches/upload', {
           fileName: file.name,
           fileBase64,
           reportingDate,
           name
-        })
+        }),
+        this.workTimeoutMs
       )
     );
   }
@@ -50,37 +53,37 @@ export class ApiService {
       if (value !== undefined && value !== '') query.set(key, String(value));
     });
     const qs = query.toString();
-    return firstValueFrom(this.http.get<{ rows: WorkflowRow[]; total: number; page: number; pageSize: number }>(`/api/batches/${batchId}/rows${qs ? `?${qs}` : ''}`));
+    return this.resolve(this.http.get<{ rows: WorkflowRow[]; total: number; page: number; pageSize: number }>(`/api/batches/${batchId}/rows${qs ? `?${qs}` : ''}`));
   }
 
   batchSummary(batchId: string): Promise<BatchSummary> {
-    return firstValueFrom(this.http.get<BatchSummary>(`/api/batches/${batchId}/summary`));
+    return this.resolve(this.http.get<BatchSummary>(`/api/batches/${batchId}/summary`), 30000);
   }
 
   patchRow(rowId: string, patch: Partial<WorkflowRow>): Promise<WorkflowRow> {
-    return firstValueFrom(this.http.patch<{ row: WorkflowRow }>(`/api/rows/${rowId}`, patch)).then((res) => res.row);
+    return this.resolve(this.http.patch<{ row: WorkflowRow }>(`/api/rows/${rowId}`, patch)).then((res) => res.row);
   }
 
   listRules(): Promise<RuleDefinition[]> {
-    return firstValueFrom(this.http.get<{ rules: RuleDefinition[] }>('/api/rules')).then((res) => res.rules);
+    return this.resolve(this.http.get<{ rules: RuleDefinition[] }>('/api/rules')).then((res) => res.rules);
   }
 
   importDefaultDaf(): Promise<{ report: Record<string, unknown>; rules: RuleDefinition[] }> {
-    return firstValueFrom(this.http.post<{ report: Record<string, unknown>; rules: RuleDefinition[] }>('/api/rules/import-daf', {}));
+    return this.resolve(this.http.post<{ report: Record<string, unknown>; rules: RuleDefinition[] }>('/api/rules/import-daf', {}), this.workTimeoutMs);
   }
 
   seedRules(force = false): Promise<{ report: Record<string, unknown>; rules: RuleDefinition[]; seeded: boolean }> {
-    return firstValueFrom(this.http.post<{ report: Record<string, unknown>; rules: RuleDefinition[]; seeded: boolean }>('/api/rules/seed', { force }));
+    return this.resolve(this.http.post<{ report: Record<string, unknown>; rules: RuleDefinition[]; seeded: boolean }>('/api/rules/seed', { force }), this.workTimeoutMs);
   }
 
   importDaf(file: File): Promise<{ report: Record<string, unknown>; rules: RuleDefinition[] }> {
     return this.fileToBase64(file).then((fileBase64) =>
-      firstValueFrom(this.http.post<{ report: Record<string, unknown>; rules: RuleDefinition[] }>('/api/rules/import-daf', { fileName: file.name, fileBase64 }))
+      this.resolve(this.http.post<{ report: Record<string, unknown>; rules: RuleDefinition[] }>('/api/rules/import-daf', { fileName: file.name, fileBase64 }), this.workTimeoutMs)
     );
   }
 
   runBatch(batchId: string, dryRun = false): Promise<{ run: RuleRun; results: unknown[]; dryRun: boolean }> {
-    return firstValueFrom(this.http.post<{ run: RuleRun; results: unknown[]; dryRun: boolean }>('/api/runs', { batchId, mode: 'full_batch', dryRun }));
+    return this.resolve(this.http.post<{ run: RuleRun; results: unknown[]; dryRun: boolean }>('/api/runs', { batchId, mode: 'full_batch', dryRun }), this.workTimeoutMs);
   }
 
   exportBatch(batchId: string, format: 'csv' | 'xlsx'): void {
@@ -98,6 +101,10 @@ export class ApiService {
         link.click();
         URL.revokeObjectURL(url);
       });
+  }
+
+  private resolve<T>(request: Observable<T>, ms = this.statusTimeoutMs): Promise<T> {
+    return firstValueFrom(request.pipe(timeout({ first: ms })));
   }
 
   private fileToBase64(file: File): Promise<string> {

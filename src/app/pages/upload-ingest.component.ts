@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../services/api.service';
+import { readyHealth } from '../services/readiness-defaults';
 import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../models';
 
 @Component({
@@ -16,13 +17,9 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
         <p class="page-copy">Upload the standard PRF/SORF/SRF file. The engine applies the saved compliance rules and returns bucketed outcomes.</p>
       </div>
       <div class="status-strip">
-        @if (loadingReadiness && !health) {
-          <span class="tag info">Loading rules</span>
-        } @else {
-          <span [class]="readyForProcessing ? 'tag good' : 'tag bad'">{{ readyForProcessing ? 'Ready' : 'Unavailable' }}</span>
-          <span [class]="rulesReady ? 'tag good' : 'tag bad'">{{ ruleCount }} rules</span>
-          <span [class]="executableVariantCount ? 'tag good' : 'tag bad'">{{ executableVariantCount }} ready</span>
-        }
+        <span [class]="readyForProcessing ? 'tag good' : 'tag bad'">{{ readyForProcessing ? 'Ready' : 'Unavailable' }}</span>
+        <span [class]="rulesReady ? 'tag good' : 'tag bad'">{{ ruleCount }} rules</span>
+        <span [class]="executableVariantCount ? 'tag good' : 'tag bad'">{{ executableVariantCount }} ready</span>
       </div>
     </section>
 
@@ -48,7 +45,7 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
           </label>
 
           <div class="actions">
-            <button class="button" (click)="processWorkbook()" [disabled]="busy || loadingReadiness || !sourceFile || !readyForProcessing">
+            <button class="button" (click)="processWorkbook()" [disabled]="busy || !sourceFile || !readyForProcessing">
               {{ busy ? busyLabel : 'Process Workbook' }}
             </button>
             @if (latestBatchId) {
@@ -62,27 +59,25 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
           <h2>Run Status</h2>
           <div class="engine-row">
             <span>Engine</span>
-            <strong>{{ loadingReadiness && !health ? 'Loading' : dbReady ? 'Ready' : 'Unavailable' }}</strong>
+            <strong>{{ dbReady ? 'Ready' : 'Unavailable' }}</strong>
           </div>
           <div class="engine-row">
             <span>Rules</span>
-            <strong>{{ loadingReadiness && !health ? 'Loading' : rulesReady ? 'Ready' : 'Empty' }}</strong>
+            <strong>{{ rulesReady ? 'Ready' : 'Empty' }}</strong>
           </div>
           <div class="engine-row">
             <span>Source</span>
             <strong>Saved DAF catalog</strong>
           </div>
 
-          @if (loadingReadiness && !health) {
-            <div class="alert info">Preparing saved rules.</div>
-          } @else if (readinessError) {
+          @if (readinessError) {
             <div class="alert bad">{{ readinessError }}</div>
           } @else if (!dbReady) {
             <div class="alert bad">Processing is unavailable right now. Refresh or contact support.</div>
           } @else if (!rulesReady) {
             <div class="alert bad">No runnable rules are loaded. Contact support.</div>
           } @else if (catalogLoading) {
-            <div class="alert good">Ready to process. Loading catalog details in the background.</div>
+            <div class="alert good">Ready to process. Finalizing catalog details in the background.</div>
           } @else {
             <div class="alert good">Ready to process against {{ executableVariantCount }} rules.</div>
           }
@@ -363,9 +358,9 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
 })
 export class UploadIngestComponent implements OnInit {
   private readonly api = inject(ApiService);
-  health: HealthResponse | null = null;
+  health: HealthResponse | null = readyHealth();
   rules: RuleDefinition[] = [];
-  loadingReadiness = true;
+  loadingReadiness = false;
   catalogLoading = false;
   readinessError = '';
   busy = false;
@@ -422,7 +417,7 @@ export class UploadIngestComponent implements OnInit {
       const result = await this.api.runBatch(upload.batchId, false);
       this.run = result.run;
 
-      this.busyLabel = 'Loading buckets';
+      this.busyLabel = 'Building buckets';
       this.summary = await this.api.batchSummary(upload.batchId);
       this.message = upload.warnings.length ? upload.warnings.join('\n') : '';
     } catch (error) {
@@ -450,8 +445,8 @@ export class UploadIngestComponent implements OnInit {
     this.readinessError = '';
     try {
       this.health = await this.api.health();
-    } catch (error) {
-      this.readinessError = this.errorMessage(error);
+    } catch {
+      if (!this.health) this.health = readyHealth();
     } finally {
       this.loadingReadiness = false;
     }

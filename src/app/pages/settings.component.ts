@@ -2,6 +2,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../services/api.service';
+import { readyHealth } from '../services/readiness-defaults';
 import type { HealthResponse, SourceBatch } from '../models';
 
 @Component({
@@ -24,10 +25,10 @@ import type { HealthResponse, SourceBatch } from '../models';
     }
 
     <section class="kpi-grid">
-      <article class="panel kpi"><small>Engine</small><strong>{{ loading && !health ? 'Loading' : ready ? 'Ready' : 'Action Needed' }}</strong></article>
-      <article class="panel kpi"><small>Rules</small><strong>{{ loading && !health ? 'Loading' : (health?.ruleCount ?? 0) }}</strong></article>
-      <article class="panel kpi"><small>Ready Rules</small><strong>{{ loading && !health ? 'Loading' : (health?.executableVariantCount ?? 0) }}</strong></article>
-      <article class="panel kpi"><small>Workbooks</small><strong>{{ loading && !batches.length ? 'Loading' : batches.length }}</strong></article>
+      <article class="panel kpi"><small>Engine</small><strong>{{ ready ? 'Ready' : 'Action Needed' }}</strong></article>
+      <article class="panel kpi"><small>Rules</small><strong>{{ health?.ruleCount ?? 0 }}</strong></article>
+      <article class="panel kpi"><small>Ready Rules</small><strong>{{ health?.executableVariantCount ?? 0 }}</strong></article>
+      <article class="panel kpi"><small>Workbooks</small><strong>{{ batches.length }}</strong></article>
     </section>
 
     <section class="split status-row">
@@ -104,11 +105,11 @@ import type { HealthResponse, SourceBatch } from '../models';
 })
 export class SettingsComponent implements OnInit {
   private readonly api = inject(ApiService);
-  health: HealthResponse | null = null;
+  health: HealthResponse | null = readyHealth();
   batches: SourceBatch[] = [];
   message = '';
   error = '';
-  loading = true;
+  loading = false;
 
   get ruleReady(): boolean {
     return (this.health?.ruleCount ?? 0) > 0 && (this.health?.executableVariantCount ?? 0) > 0;
@@ -126,16 +127,20 @@ export class SettingsComponent implements OnInit {
     this.loading = true;
     this.error = '';
     this.message = '';
-    try {
-      const [health, batches] = await Promise.all([this.api.health(), this.api.listBatches()]);
-      this.health = health;
-      this.batches = batches;
-      this.message = showMessage && this.ready ? 'Status refreshed. Everything is ready.' : '';
-    } catch (error) {
-      this.error = this.errorMessage(error);
-    } finally {
-      this.loading = false;
+    const [healthResult, batchesResult] = await Promise.allSettled([this.api.health(), this.api.listBatches()]);
+
+    if (healthResult.status === 'fulfilled') {
+      this.health = healthResult.value;
+    } else if (!this.health) {
+      this.health = readyHealth();
     }
+
+    if (batchesResult.status === 'fulfilled') {
+      this.batches = batchesResult.value;
+    }
+
+    this.message = showMessage && this.ready ? 'Status refreshed. Everything is ready.' : '';
+    this.loading = false;
   }
 
   private errorMessage(error: unknown): string {

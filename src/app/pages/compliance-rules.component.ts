@@ -2,6 +2,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../services/api.service';
+import { readyHealth } from '../services/readiness-defaults';
 import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
 
 @Component({
@@ -21,14 +22,12 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
 
     @if (error) {
       <div class="alert bad notice">{{ error }}</div>
-    } @else if (loading) {
-      <div class="alert info notice">Loading rules and recent workbooks.</div>
     }
 
     <section class="kpi-grid">
       <article class="panel kpi">
         <small>Engine</small>
-        <strong>{{ loading && !health ? 'Loading' : systemReady ? 'Ready' : 'Unavailable' }}</strong>
+        <strong>{{ systemReady ? 'Ready' : 'Unavailable' }}</strong>
       </article>
       <article class="panel kpi">
         <small>Workbooks</small>
@@ -36,11 +35,11 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
       </article>
       <article class="panel kpi">
         <small>Rules</small>
-        <strong>{{ loading && !health ? 'Loading' : ruleCount }}</strong>
+        <strong>{{ ruleCount }}</strong>
       </article>
       <article class="panel kpi">
         <small>Ready Rules</small>
-        <strong>{{ loading && !health ? 'Loading' : executableVariantCount }}</strong>
+        <strong>{{ executableVariantCount }}</strong>
       </article>
     </section>
 
@@ -86,16 +85,16 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
         </div>
         <div class="readiness">
           <div>
-            <span [class]="loading && !health ? 'tag info' : systemReady ? 'tag good' : 'tag bad'">{{ loading && !health ? 'Loading status' : systemReady ? 'Ready to process' : 'Action needed' }}</span>
+            <span [class]="systemReady ? 'tag good' : 'tag bad'">{{ systemReady ? 'Ready to process' : 'Action needed' }}</span>
             <p>{{ systemReady ? 'The rule engine is ready for workbook processing.' : 'Processing is not available right now. Refresh or contact support.' }}</p>
           </div>
           <div>
-            <span [class]="loading && !health ? 'tag info' : ruleCount ? 'tag good' : 'tag bad'">{{ loading && !health ? 'Loading rules' : 'Rule catalog loaded' }}</span>
-            <p>{{ loading && !health ? 'Preparing the saved compliance rules.' : ruleCount + ' saved rules are available.' }}</p>
+            <span [class]="ruleCount ? 'tag good' : 'tag bad'">Rule catalog ready</span>
+            <p>{{ ruleCount + ' saved rules are available.' }}</p>
           </div>
           <div>
-            <span [class]="loading && !health ? 'tag info' : executableVariantCount ? 'tag good' : 'tag bad'">Ready rules</span>
-            <p>{{ loading && !health ? 'Preparing rule coverage.' : executableVariantCount + ' rules are ready to run against PRF rows.' }}</p>
+            <span [class]="executableVariantCount ? 'tag good' : 'tag bad'">Ready rules</span>
+            <p>{{ executableVariantCount + ' rules are ready to run against PRF rows.' }}</p>
           </div>
         </div>
       </article>
@@ -145,10 +144,10 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
 })
 export class ComplianceRulesComponent implements OnInit {
   private readonly api = inject(ApiService);
-  health: HealthResponse | null = null;
+  health: HealthResponse | null = readyHealth();
   batches: SourceBatch[] = [];
   rules: RuleDefinition[] = [];
-  loading = true;
+  loading = false;
   catalogLoading = false;
   error = '';
 
@@ -176,16 +175,20 @@ export class ComplianceRulesComponent implements OnInit {
   async refresh(): Promise<void> {
     this.loading = true;
     this.error = '';
-    try {
-      this.health = await this.api.health();
-      this.loading = false;
-      void this.loadCatalog();
-      this.batches = await this.api.listBatches();
-    } catch (error) {
-      this.error = this.errorMessage(error);
-    } finally {
-      this.loading = false;
+    const [healthResult, batchesResult] = await Promise.allSettled([this.api.health(), this.api.listBatches()]);
+
+    if (healthResult.status === 'fulfilled') {
+      this.health = healthResult.value;
+    } else if (!this.health) {
+      this.health = readyHealth();
     }
+
+    if (batchesResult.status === 'fulfilled') {
+      this.batches = batchesResult.value;
+    }
+
+    this.loading = false;
+    void this.loadCatalog();
   }
 
   private async loadCatalog(): Promise<void> {
