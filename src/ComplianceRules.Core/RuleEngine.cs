@@ -1,9 +1,24 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 public static class RuleEngine
 {
+    private static readonly Dictionary<string, string[]> ReferenceLists = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["local_vendors"] =
+        [
+            "Baldor",
+            "Network",
+            "UNFI",
+            "Vesta",
+            "Vistar Vending",
+            "The Chefs Warehouse",
+            "Gourmet"
+        ]
+    };
+
     private static readonly BucketDefinition[] Buckets =
     [
         new("auto-approved", "Auto Approved", "Rows the engine can approve cleanly from DAF logic.", "good"),
@@ -263,6 +278,10 @@ public static class RuleEngine
             "le" => NumberValue(left) <= NumberValue(right),
             "in" => InList(left, right),
             "not_in" => !InList(left, right),
+            "in_ref" => InReferenceList(left, right),
+            "not_in_ref" => !InReferenceList(left, right),
+            "regex" => Regex.IsMatch(Normalizer.CleanText(left), Normalizer.CleanText(right), RegexOptions.IgnoreCase),
+            "not_regex" => !Regex.IsMatch(Normalizer.CleanText(left), Normalizer.CleanText(right), RegexOptions.IgnoreCase),
             _ => false
         };
     }
@@ -271,6 +290,10 @@ public static class RuleEngine
     {
         foreach (var node in actions.OfType<JsonObject>())
         {
+            var context = ContextForRow(row);
+            if (node["when"] is JsonObject when && !EvaluatePredicate(when, context)) continue;
+            if (BoolValue(node["only_if_action_blank"]) && !string.IsNullOrWhiteSpace(row.Action)) continue;
+
             var type = Normalizer.CleanText(node["type"]);
             switch (type)
             {
@@ -399,6 +422,14 @@ public static class RuleEngine
         var value = Normalizer.NormalizeKey(left);
         if (right is JsonArray array) return array.Any(item => Normalizer.NormalizeKey(item) == value);
         return Normalizer.CleanText(right).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(item => Normalizer.NormalizeKey(item) == value);
+    }
+
+    private static bool InReferenceList(JsonNode? left, JsonNode? right)
+    {
+        var key = Normalizer.CleanText(right);
+        var value = Normalizer.CleanText(left);
+        return ReferenceLists.TryGetValue(key, out var list) &&
+            list.Any(item => value.Contains(item, StringComparison.OrdinalIgnoreCase));
     }
 }
 

@@ -17,7 +17,7 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
         <p class="page-copy">Upload the standard PRF/SORF/SRF file. The engine applies the saved compliance rules and returns bucketed outcomes.</p>
       </div>
       <div class="status-strip">
-        <span [class]="readyForProcessing ? 'tag good' : 'tag bad'">{{ readyForProcessing ? 'Ready' : 'Unavailable' }}</span>
+        <span [class]="readyForProcessing ? 'tag good' : 'tag warn'">{{ readyForProcessing ? 'Ready' : 'Setup Required' }}</span>
         <span [class]="rulesReady ? 'tag good' : 'tag bad'">{{ ruleCount }} rules</span>
         <span [class]="executableVariantCount ? 'tag good' : 'tag bad'">{{ executableVariantCount }} ready</span>
       </div>
@@ -59,7 +59,7 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
           <h2>Run Status</h2>
           <div class="engine-row">
             <span>Engine</span>
-            <strong>{{ dbReady ? 'Ready' : 'Unavailable' }}</strong>
+            <strong>{{ dbReady ? 'Ready' : 'Setup Required' }}</strong>
           </div>
           <div class="engine-row">
             <span>Rules</span>
@@ -73,7 +73,7 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
           @if (readinessError) {
             <div class="alert bad">{{ readinessError }}</div>
           } @else if (!dbReady) {
-            <div class="alert bad">Processing is unavailable right now. Refresh or contact support.</div>
+            <div class="alert warn">Connect workspace storage before processing a workbook.</div>
           } @else if (!rulesReady) {
             <div class="alert bad">No runnable rules are loaded. Contact support.</div>
           } @else if (catalogLoading) {

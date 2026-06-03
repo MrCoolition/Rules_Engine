@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dapper;
+using Microsoft.Extensions.Configuration;
 using Npgsql;
 
 public sealed class ComplianceStore
@@ -25,6 +26,25 @@ public sealed class ComplianceStore
         foreach (var statement in Migrations.Statements) await connection.ExecuteAsync(statement);
     }
 
+    public async Task<RuleSeedCatalog> EnsureSeededAsync(bool force = false)
+    {
+        await BootstrapAsync();
+        var existingRules = force ? new List<RuleDefinition>() : await ListRulesAsync();
+        if (!force && existingRules.Count > 0)
+        {
+            return new RuleSeedCatalog(existingRules, RuleEditor.ReportFromRules(existingRules));
+        }
+
+        var seed = DafSeedCatalog.Build();
+        await ReplaceRuleCatalogAsync(seed.Rules);
+        await AuditAsync(
+            force ? "rules.reseeded" : "rules.seeded",
+            "rule_catalog",
+            null,
+            JsonSerializer.SerializeToNode(seed.Report, JsonDefaults.Options) as JsonObject ?? new JsonObject());
+        return seed;
+    }
+
     public async Task<int> RuleCountAsync()
     {
         if (!IsConfigured) return 0;
@@ -43,14 +63,14 @@ public sealed class ComplianceStore
     {
         await using var connection = await OpenAsync();
         var rows = await connection.QueryAsync("select * from source_batches where status <> 'archived' order by created_at desc");
-        return rows.Select(row => ToBatch(Row(row))).ToList();
+        return rows.Select(row => ToBatch(Row((object)row))).ToList();
     }
 
     public async Task<SourceBatch?> GetBatchAsync(Guid batchId)
     {
         await using var connection = await OpenAsync();
         var row = await connection.QueryFirstOrDefaultAsync("select * from source_batches where id = @batchId limit 1", new { batchId });
-        return row is null ? null : ToBatch(Row(row));
+        return row is null ? null : ToBatch(Row((object)row));
     }
 
     public async Task<bool> ArchiveBatchAsync(Guid batchId)
@@ -82,7 +102,7 @@ public sealed class ComplianceStore
     {
         await using var connection = await OpenAsync();
         var rows = await connection.QueryAsync("select * from workflow_rows where batch_id = @batchId order by source_row_number asc", new { batchId });
-        return rows.Select(row => ToWorkflowRow(Row(row))).ToList();
+        return rows.Select(row => ToWorkflowRow(Row((object)row))).ToList();
     }
 
     public async Task ReplaceRowsAsync(Guid batchId, IReadOnlyList<WorkflowRow> rows)
@@ -99,7 +119,7 @@ public sealed class ComplianceStore
         await using var connection = await OpenAsync();
         var current = await connection.QueryFirstOrDefaultAsync("select * from workflow_rows where id = @rowId limit 1", new { rowId });
         if (current is null) return null;
-        var before = ToWorkflowRow(Row(current));
+        var before = ToWorkflowRow(Row((object)current));
         var after = RuleEngine.ApplyRowPatch(before, patch);
         await using var transaction = await connection.BeginTransactionAsync();
         await UpsertRowAsync(connection, transaction, after);
@@ -127,7 +147,7 @@ public sealed class ComplianceStore
             from rule_definitions d
             join rule_versions v on v.rule_definition_id = d.id
             order by d.rule_id
-            """)).Select(row => Row(row)).ToList();
+            """)).Select(row => Row((object)row)).ToList();
         var variants = (await connection.QueryAsync(
             """
             select rv.*, v.rule_definition_id, d.rule_id
@@ -135,7 +155,7 @@ public sealed class ComplianceStore
             join rule_versions v on v.id = rv.rule_version_id
             join rule_definitions d on d.id = v.rule_definition_id
             order by rv.execution_priority
-            """)).Select(row => Row(row)).ToList();
+            """)).Select(row => Row((object)row)).ToList();
         return definitions.Select(row => ToRuleDefinition(row, variants.Where(variant => GuidValue(variant, "rule_definition_id") == GuidValue(row, "id")).ToList())).ToList();
     }
 
@@ -284,14 +304,14 @@ public sealed class ComplianceStore
     {
         await using var connection = await OpenAsync();
         var row = await connection.QueryFirstOrDefaultAsync("select * from rule_runs where id = @runId limit 1", new { runId });
-        return row is null ? null : ToRuleRun(Row(row));
+        return row is null ? null : ToRuleRun(Row((object)row));
     }
 
     public async Task<List<RowExecutionResult>> ListRunResultsAsync(Guid runId)
     {
         await using var connection = await OpenAsync();
         var rows = await connection.QueryAsync("select * from row_execution_results where run_id = @runId order by created_at", new { runId });
-        return rows.Select(row => ToRowExecutionResult(Row(row))).ToList();
+        return rows.Select(row => ToRowExecutionResult(Row((object)row))).ToList();
     }
 
     public async Task AuditAsync(string eventType, string entityType, Guid? entityId, JsonObject payload)
@@ -304,7 +324,7 @@ public sealed class ComplianceStore
 
     private async Task<NpgsqlConnection> OpenAsync()
     {
-        if (!IsConfigured) throw new InvalidOperationException("DATABASE_URL is required.");
+        if (!IsConfigured) throw new InvalidOperationException("Storage connection is required.");
         var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync();
         return connection;
@@ -576,7 +596,6 @@ public sealed class ComplianceStore
             Username = Uri.UnescapeDataString(userInfo.ElementAtOrDefault(0) ?? ""),
             Password = Uri.UnescapeDataString(userInfo.ElementAtOrDefault(1) ?? ""),
             SslMode = SslMode.Require,
-            TrustServerCertificate = true,
             Pooling = true
         };
         return builder.ConnectionString;

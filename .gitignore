@@ -2,6 +2,10 @@ node_modules
 dist
 .angular
 .vercel
+bin
+obj
+wwwroot
+.vs
 .env
 .env.local
 .env.*.local

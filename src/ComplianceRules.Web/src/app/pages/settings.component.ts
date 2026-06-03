@@ -25,7 +25,7 @@ import type { HealthResponse, SourceBatch } from '../models';
     }
 
     <section class="kpi-grid">
-      <article class="panel kpi"><small>Engine</small><strong>{{ ready ? 'Ready' : 'Action Needed' }}</strong></article>
+      <article class="panel kpi"><small>Engine</small><strong>{{ ready ? 'Ready' : 'Setup Required' }}</strong></article>
       <article class="panel kpi"><small>Rules</small><strong>{{ health?.ruleCount ?? 0 }}</strong></article>
       <article class="panel kpi"><small>Ready Rules</small><strong>{{ health?.executableVariantCount ?? 0 }}</strong></article>
       <article class="panel kpi"><small>Workbooks</small><strong>{{ batches.length }}</strong></article>
@@ -35,11 +35,11 @@ import type { HealthResponse, SourceBatch } from '../models';
       <article class="panel status-card">
         <h2>Processing</h2>
         <div class="status-line">
-          <span [class]="ready ? 'tag good' : 'tag bad'">{{ ready ? 'Ready' : 'Action needed' }}</span>
-          <p>{{ ready ? 'Workbook processing is available. Upload a PRF/SORF/SRF file to run the saved rules.' : 'Workbook processing is not available right now. Refresh status or contact support.' }}</p>
+          <span [class]="ready ? 'tag good' : 'tag warn'">{{ ready ? 'Ready' : 'Setup required' }}</span>
+          <p>{{ ready ? 'Workbook processing is available. Upload a PRF/SORF/SRF file to run the saved rules.' : 'Connect workspace storage before processing workbooks.' }}</p>
         </div>
         <div class="status-line">
-          <span [class]="ruleReady ? 'tag good' : 'tag bad'">{{ ruleReady ? 'Rules loaded' : 'Rules unavailable' }}</span>
+          <span [class]="ruleReady ? 'tag good' : 'tag warn'">{{ ruleReady ? 'Rules loaded' : 'Rules pending' }}</span>
           <p>{{ ruleReady ? (health?.ruleCount ?? 0) + ' saved rules are available, with ' + (health?.executableVariantCount ?? 0) + ' ready to run.' : 'The saved rule catalog is not ready.' }}</p>
         </div>
       </article>

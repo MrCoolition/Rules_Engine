@@ -1,0 +1,69 @@
+name: Deploy Compliance Rules
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  NODE_VERSION: '22.x'
+  API_PROJECT: src/ComplianceRules.Api/ComplianceRules.Api.csproj
+  WEB_PROJECT_DIR: src/ComplianceRules.Web
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Restore frontend dependencies
+        working-directory: ${{ env.WEB_PROJECT_DIR }}
+        run: npm install
+
+      - name: Build frontend
+        working-directory: ${{ env.WEB_PROJECT_DIR }}
+        run: npm run build
+
+      - name: Stage frontend into ASP.NET Core wwwroot
+        shell: pwsh
+        run: |
+          Remove-Item -LiteralPath src/ComplianceRules.Api/wwwroot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path src/ComplianceRules.Api/wwwroot | Out-Null
+          Copy-Item -Path src/ComplianceRules.Web/dist/rules-engine/browser/* -Destination src/ComplianceRules.Api/wwwroot -Recurse -Force
+
+      - name: Publish ASP.NET Core app
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -o publish /p:BuildClientApp=false
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-rules-app
+          path: publish
+
+  deploy:
+    needs: build
+    runs-on: windows-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: compliance-rules-app
+          path: publish
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_APP_SERVICE_NAME }}
+          publish-profile: ${{ secrets.AZURE_APP_SERVICE_PUBLISH_PROFILE }}
+          package: publish

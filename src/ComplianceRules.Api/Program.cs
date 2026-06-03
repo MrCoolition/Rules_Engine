@@ -1,11 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using ClosedXML.Excel;
-using Dapper;
-using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -34,18 +30,49 @@ builder.Services.AddCors(options =>
 builder.Services.AddSingleton<ComplianceStore>();
 
 var app = builder.Build();
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var feature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
+        var exception = feature?.Error;
+        context.Response.StatusCode = exception is InvalidOperationException ? StatusCodes.Status400BadRequest : StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new
+        {
+            error = exception is InvalidOperationException ? exception.Message : "Request failed."
+        });
+    });
+});
 app.UseCors();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.MapGet("/api/health", async (ComplianceStore store) =>
 {
     var configured = store.IsConfigured;
-    var ruleCount = configured ? await store.RuleCountAsync() : 0;
-    var readyCount = configured ? await store.ReadyVariantCountAsync() : 0;
+    var ready = false;
+    var ruleCount = 0;
+    var readyCount = 0;
+    if (configured)
+    {
+        try
+        {
+            await store.EnsureSeededAsync();
+            ruleCount = await store.RuleCountAsync();
+            readyCount = await store.ReadyVariantCountAsync();
+            ready = true;
+        }
+        catch
+        {
+            ready = false;
+        }
+    }
     return Results.Ok(new
     {
-        ok = configured,
-        store = configured ? "neon" : "memory",
-        databaseConfigured = configured,
+        ok = ready,
+        store = ready ? "connected" : "offline",
+        databaseConfigured = ready,
         defaultDafWorkbook = false,
         defaultSourceWorkbook = false,
         rulesSeeded = ruleCount > 0,
@@ -59,7 +86,7 @@ app.MapGet("/api/routes", () => Results.Ok(RouteManifest.Current));
 
 app.MapPost("/api/bootstrap", async (ComplianceStore store) =>
 {
-    await store.BootstrapAsync();
+    await store.EnsureSeededAsync();
     return Results.Ok(new
     {
         ok = true,
@@ -71,10 +98,14 @@ app.MapPost("/api/bootstrap", async (ComplianceStore store) =>
 });
 
 app.MapGet("/api/batches", async (ComplianceStore store) =>
-    Results.Ok(new { batches = await store.ListBatchesAsync() }));
+{
+    await store.EnsureSeededAsync();
+    return Results.Ok(new { batches = await store.ListBatchesAsync() });
+});
 
 app.MapPost("/api/batches/upload", async (ComplianceStore store, UploadWorkbookRequest request) =>
 {
+    await store.EnsureSeededAsync();
     var bytes = PayloadBytes(request.FileBase64);
     var parsed = WorkbookParser.ParseSourceWorkbook(request.FileName, bytes);
     var batchId = Guid.NewGuid();
@@ -144,10 +175,14 @@ app.MapPatch("/api/rows/{rowId:guid}", async (ComplianceStore store, Guid rowId,
 });
 
 app.MapGet("/api/rules", async (ComplianceStore store) =>
-    Results.Ok(new { rules = await store.ListRulesAsync() }));
+{
+    await store.EnsureSeededAsync();
+    return Results.Ok(new { rules = await store.ListRulesAsync() });
+});
 
 app.MapPost("/api/rules", async (ComplianceStore store, RuleCreateRequest request) =>
 {
+    await store.EnsureSeededAsync();
     var rules = await store.ListRulesAsync();
     var rule = RuleEditor.CreateUserRule(request, rules);
     rules.Add(rule);
@@ -158,12 +193,14 @@ app.MapPost("/api/rules", async (ComplianceStore store, RuleCreateRequest reques
 
 app.MapPost("/api/rules/seed", async (ComplianceStore store, SeedRequest request) =>
 {
+    var seed = await store.EnsureSeededAsync(request.Force);
     var rules = await store.ListRulesAsync();
-    return Results.Ok(new { rules, seeded = rules.Count > 0, report = RuleEditor.ReportFromRules(rules) });
+    return Results.Ok(new { rules, seeded = rules.Count > 0, report = seed.Report });
 });
 
 app.MapPost("/api/rules/import-daf", async (ComplianceStore store) =>
 {
+    await store.EnsureSeededAsync();
     var rules = await store.ListRulesAsync();
     return Results.Ok(new { rules, report = RuleEditor.ReportFromRules(rules) });
 });
@@ -279,6 +316,7 @@ app.MapPost("/api/rules/simulate", async (ComplianceStore store, SimulateRequest
 
 app.MapPost("/api/runs", async (ComplianceStore store, RunRequest request) =>
 {
+    await store.EnsureSeededAsync();
     var beforeRows = await store.GetRowsAsync(request.BatchId);
     var rules = await store.ListRulesAsync();
     var result = RuleEngine.ExecuteRows(beforeRows, rules, request.RowIds);
@@ -309,6 +347,8 @@ app.MapGet("/api/runs/{runId:guid}", async (ComplianceStore store, Guid runId) =
 app.MapGet("/api/runs/{runId:guid}/results", async (ComplianceStore store, Guid runId) =>
     Results.Ok(new { results = await store.ListRunResultsAsync(runId) }));
 
+app.MapFallbackToFile("index.html");
+
 app.Run();
 
 static byte[] PayloadBytes(string? fileBase64)
@@ -320,15 +360,6 @@ static byte[] PayloadBytes(string? fileBase64)
 
 static string Sha256(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 static string Text(JsonNode? node) => node is null ? "" : node.GetValueKind() == JsonValueKind.String ? node.GetValue<string>() : node.ToJsonString();
-
-static class JsonDefaults
-{
-    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-    };
-}
 
 static class RouteManifest
 {
@@ -375,4 +406,3 @@ static class RouteManifest
         }
     };
 }
-

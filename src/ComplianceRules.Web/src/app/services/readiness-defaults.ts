@@ -2,7 +2,7 @@ import type { HealthResponse } from '../models';
 
 export const READY_HEALTH: HealthResponse = {
   ok: true,
-  store: 'neon',
+  store: 'connected',
   databaseConfigured: true,
   defaultDafWorkbook: false,
   defaultSourceWorkbook: false,

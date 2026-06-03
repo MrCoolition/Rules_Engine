@@ -1,55 +1,66 @@
-# Rules Execution Engine
+# Compliance Rules
 
-Angular 21 compliance rules processor with Neon Postgres support. The Angular frontend can use either the legacy Vercel TypeScript functions or the ASP.NET Core API in `dotnet-api/`.
+.NET-native PRF/SORF/SRF compliance rules processor with an Angular 21 frontend and ASP.NET Core API.
 
-## Local setup
+## Architecture
 
-1. Install dependencies with `npm install`.
-2. Optional: set `DATABASE_URL` in `.env.local` for Neon-backed persistence.
-3. Run `npm run dev` for the Angular app.
-4. Run `vercel dev` when you want the Angular app and `/api/*` functions together.
+```text
+ComplianceRules.sln
+src/
+  ComplianceRules.Api/    ASP.NET Core host, /api endpoints, Angular static hosting
+  ComplianceRules.Core/   Rule models, normalization, execution, bucket logic, workbook parsing
+  ComplianceRules.Data/   Postgres/Neon schema and data access
+  ComplianceRules.Web/    Angular 21 frontend
+legacy/
+  vercel-functions/       Old Vercel TypeScript API, retained only for reference
+```
 
-Without `DATABASE_URL`, the API runs in demo memory mode. With Neon, `GET /api/health`, `GET /api/rules`, and `POST /api/bootstrap` ensure the schema exists and seed the bundled DAF-derived rules when the catalog is empty.
+The active app is ASP.NET Core. Vercel Functions are no longer the primary backend.
 
-The operational `.xlsx` workbooks are intentionally ignored for public GitHub safety. The DAF logic is generated into `api/_shared/daf-seed.ts`, then seeded into Neon as rule definitions and variants. Analysts upload only PRF/SORF/SRF workbooks through Process PRF.
+## Runtime
 
-## ASP.NET Core API
+- .NET 10 SDK
+- Node.js 22
+- Postgres connection string in `DATABASE_URL`
 
-The .NET API lives in `dotnet-api/` and mirrors the `/api/*` route surface used by Angular. It uses the same Neon schema and stored rule JSON.
+The app works with Neon Postgres or any compatible Postgres instance.
 
-1. Install the .NET SDK.
-2. Set `DATABASE_URL`.
-3. Run:
+## Local Development
 
 ```powershell
-cd dotnet-api
+$env:DATABASE_URL="postgresql://user:password@host/dbname?sslmode=require"
+
+cd src/ComplianceRules.Web
+npm install
+npm run build
+
+cd ../ComplianceRules.Api
 dotnet restore
 dotnet run
 ```
 
-To point Angular at a hosted .NET API, edit `public/runtime-config.js`:
+Open `https://localhost:7088` or `http://localhost:5088`.
 
-```js
-window.__COMPLIANCE_API_BASE__ = "https://your-dotnet-api.example.com";
+For frontend-only development:
+
+```powershell
+cd src/ComplianceRules.Web
+npm run dev
 ```
 
-Leave that value empty to keep same-origin `/api` calls.
+The frontend calls same-origin `/api` by default. To point it at a separately running API, edit:
 
-## Primary app routes
+```text
+src/ComplianceRules.Web/public/runtime-config.js
+```
 
-- `/` Compliance Rules overview
-- `/upload` Process PRF
-- `/execute` Execution Console
-- `/workbench` Analyst Workbench
-- `/reports` Outcome Reporting
-- `/rules` Rule Catalog
-- `/settings` API and environment settings
+```js
+window.__COMPLIANCE_API_BASE__ = "https://localhost:7088";
+```
 
-## API manifest
+Leave the value empty when ASP.NET Core serves the frontend and API together.
 
-Open `/api/routes` for the live endpoint manifest.
-
-Implemented endpoints:
+## API Routes
 
 - `GET /api/health`
 - `GET /api/routes`
@@ -64,16 +75,52 @@ Implemented endpoints:
 - `POST /api/batches/:batchId/export`
 - `PATCH /api/rows/:rowId`
 - `GET /api/rules`
+- `POST /api/rules`
+- `PATCH /api/rules/:ruleId`
+- `DELETE /api/rules/:ruleId`
 - `POST /api/rules/seed`
 - `POST /api/rules/import-daf`
 - `GET /api/rules/:ruleId`
+- `POST /api/rules/:ruleId/versions`
+- `PATCH /api/rules/versions/:versionId`
+- `POST /api/rules/versions/:versionId/approve`
+- `POST /api/rules/variants/:variantId/test`
 - `POST /api/rules/simulate`
 - `POST /api/runs`
 - `GET /api/runs/:runId`
 - `GET /api/runs/:runId/results`
 
-## Vercel + Neon
+## Azure App Service
 
-Set `DATABASE_URL` in Vercel project environment variables. The API also accepts common Vercel/Neon aliases: `POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`, and `NEON_DATABASE_URL`. After deploy, open `/api/health` or `/rules`; the API will verify the schema and seed the bundled DAF-derived rules into Neon if needed.
+Use the GitHub Actions workflow:
 
-Vercel does not provide an official .NET Function runtime. Use Vercel for the Angular frontend and host `dotnet-api/` on an ASP.NET Core capable platform, then set `public/runtime-config.js` to that API origin.
+```text
+.github/workflows/azure-app-service.yml
+```
+
+Required secrets:
+
+- `AZURE_APP_SERVICE_NAME`
+- `AZURE_APP_SERVICE_PUBLISH_PROFILE`
+
+Required App Service application setting:
+
+- `DATABASE_URL`
+
+The workflow builds Angular, stages the built files into `src/ComplianceRules.Api/wwwroot`, publishes the ASP.NET Core app, and deploys the single app package.
+
+## Database
+
+`POST /api/bootstrap` creates the schema:
+
+- source batches
+- workflow rows
+- rule definitions
+- rule versions
+- rule variants
+- rule runs
+- row execution results
+- analyst overrides
+- audit events
+
+Rules are stored in Postgres as definitions, versions, variants, predicate JSON, action JSON, and original source metadata. Workbook execution reads the saved rules directly from the database.

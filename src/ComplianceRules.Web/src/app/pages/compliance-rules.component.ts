@@ -27,7 +27,7 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
     <section class="kpi-grid">
       <article class="panel kpi">
         <small>Engine</small>
-        <strong>{{ systemReady ? 'Ready' : 'Unavailable' }}</strong>
+        <strong>{{ systemReady ? 'Ready' : 'Setup Required' }}</strong>
       </article>
       <article class="panel kpi">
         <small>Workbooks</small>
@@ -85,8 +85,8 @@ import type { HealthResponse, RuleDefinition, SourceBatch } from '../models';
         </div>
         <div class="readiness">
           <div>
-            <span [class]="systemReady ? 'tag good' : 'tag bad'">{{ systemReady ? 'Ready to process' : 'Action needed' }}</span>
-            <p>{{ systemReady ? 'The rule engine is ready for workbook processing.' : 'Processing is not available right now. Refresh or contact support.' }}</p>
+            <span [class]="systemReady ? 'tag good' : 'tag warn'">{{ systemReady ? 'Ready to process' : 'Setup required' }}</span>
+            <p>{{ systemReady ? 'The rule engine is ready for workbook processing.' : 'Connect the workspace storage before processing workbooks.' }}</p>
           </div>
           <div>
             <span [class]="ruleCount ? 'tag good' : 'tag bad'">Rule catalog ready</span>

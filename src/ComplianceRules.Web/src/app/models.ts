@@ -1,6 +1,6 @@
 export interface HealthResponse {
   ok: boolean;
-  store: 'memory' | 'neon';
+  store: 'connected' | 'offline';
   databaseConfigured: boolean;
   defaultDafWorkbook: boolean;
   defaultSourceWorkbook: boolean;
