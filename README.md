@@ -1,6 +1,6 @@
 # Rules Execution Engine
 
-Angular 21 compliance rules processor with Vercel Functions and Neon Postgres support.
+Angular 21 compliance rules processor with Neon Postgres support. The Angular frontend can use either the legacy Vercel TypeScript functions or the ASP.NET Core API in `dotnet-api/`.
 
 ## Local setup
 
@@ -12,6 +12,28 @@ Angular 21 compliance rules processor with Vercel Functions and Neon Postgres su
 Without `DATABASE_URL`, the API runs in demo memory mode. With Neon, `GET /api/health`, `GET /api/rules`, and `POST /api/bootstrap` ensure the schema exists and seed the bundled DAF-derived rules when the catalog is empty.
 
 The operational `.xlsx` workbooks are intentionally ignored for public GitHub safety. The DAF logic is generated into `api/_shared/daf-seed.ts`, then seeded into Neon as rule definitions and variants. Analysts upload only PRF/SORF/SRF workbooks through Process PRF.
+
+## ASP.NET Core API
+
+The .NET API lives in `dotnet-api/` and mirrors the `/api/*` route surface used by Angular. It uses the same Neon schema and stored rule JSON.
+
+1. Install the .NET SDK.
+2. Set `DATABASE_URL`.
+3. Run:
+
+```powershell
+cd dotnet-api
+dotnet restore
+dotnet run
+```
+
+To point Angular at a hosted .NET API, edit `public/runtime-config.js`:
+
+```js
+window.__COMPLIANCE_API_BASE__ = "https://your-dotnet-api.example.com";
+```
+
+Leave that value empty to keep same-origin `/api` calls.
 
 ## Primary app routes
 
@@ -53,3 +75,5 @@ Implemented endpoints:
 ## Vercel + Neon
 
 Set `DATABASE_URL` in Vercel project environment variables. The API also accepts common Vercel/Neon aliases: `POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`, and `NEON_DATABASE_URL`. After deploy, open `/api/health` or `/rules`; the API will verify the schema and seed the bundled DAF-derived rules into Neon if needed.
+
+Vercel does not provide an official .NET Function runtime. Use Vercel for the Angular frontend and host `dotnet-api/` on an ASP.NET Core capable platform, then set `public/runtime-config.js` to that API origin.
