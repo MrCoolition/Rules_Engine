@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "installCommand": "npm --prefix src/ComplianceRules.Web ci",
+  "buildCommand": "npm --prefix src/ComplianceRules.Web run build",
+  "outputDirectory": "src/ComplianceRules.Web/dist/rules-engine/browser",
+  "rewrites": [
+    { "source": "/upload", "destination": "/index.html" },
+    { "source": "/execute", "destination": "/index.html" },
+    { "source": "/workbench", "destination": "/index.html" },
+    { "source": "/reports", "destination": "/index.html" },
+    { "source": "/rules", "destination": "/index.html" },
+    { "source": "/settings", "destination": "/index.html" }
+  ]
+}
