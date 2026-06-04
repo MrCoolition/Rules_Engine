@@ -1,11 +1,25 @@
 {
-  "name": "compliance-rules-workspace",
+  "name": "compliance-rules-app",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "packageManager": "npm@11.13.0",
   "engines": {
     "node": "22.x"
   },
   "scripts": {
-    "build": "npm --prefix src/ComplianceRules.Web run build"
+    "build": "npm --prefix src/ComplianceRules.Web run build",
+    "typecheck": "tsc -p tsconfig.api.json --noEmit"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
+    "@vercel/node": "^5.3.0",
+    "drizzle-orm": "^0.44.7",
+    "exceljs": "^4.4.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.3"
   }
 }
