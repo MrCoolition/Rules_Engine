@@ -50,7 +50,7 @@ import type { BatchSummary, HealthResponse, RuleDefinition, RuleRun } from '../m
             </button>
             @if (latestBatchId) {
               <a class="button secondary" routerLink="/workbench" [queryParams]="{ batchId: latestBatchId }">Review Rows</a>
-              <button class="button ghost" (click)="export('xlsx')">Export XLSX</button>
+              <button class="button ghost" (click)="export('xlsx')">Export to Excel</button>
             }
           </div>
         </div>

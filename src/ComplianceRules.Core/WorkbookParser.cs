@@ -127,6 +127,7 @@ public static class WorkbookParser
         "ACTION",
         "If In Stock: Action",
         "Buysmart Action",
+        "Assigned Bucket",
         "Rule Applied",
         "Needs Review",
         "Validation Status",
@@ -147,10 +148,11 @@ public static class WorkbookParser
         "ACTION" => row.Action,
         "If In Stock: Action" => row.IfInStockAction,
         "Buysmart Action" => row.BuysmartAction,
+        "Assigned Bucket" => RuleEngine.BucketForRow(row).Label,
         "Rule Applied" => row.RuleApplied,
         "Needs Review" => row.NeedsReview ? "TRUE" : "FALSE",
         "Validation Status" => row.ValidationStatus,
-        "Compliance Bucket" => row.QueueBucket,
+        "Compliance Bucket" => RuleEngine.BucketForRow(row).Label,
         "Outcome Reporting" => row.OutcomeReporting,
         "Analyst Notes" => row.AnalystNotes,
         _ => ""
@@ -162,4 +164,3 @@ public static class WorkbookParser
         return $"\"{value.Replace("\"", "\"\"")}\"";
     }
 }
-

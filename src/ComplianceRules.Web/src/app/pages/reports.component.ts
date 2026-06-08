@@ -17,7 +17,7 @@ import type { BatchSummary, SourceBatch } from '../models';
       </div>
       <div class="toolbar">
         <button class="button secondary" (click)="export('csv')" [disabled]="!selectedBatchId">CSV</button>
-        <button class="button" (click)="export('xlsx')" [disabled]="!selectedBatchId">XLSX</button>
+        <button class="button" (click)="export('xlsx')" [disabled]="!selectedBatchId">Export to Excel</button>
       </div>
     </section>
 

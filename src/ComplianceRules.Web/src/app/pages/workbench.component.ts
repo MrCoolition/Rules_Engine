@@ -14,7 +14,10 @@ import type { SourceBatch, WorkflowRow } from '../models';
         <p>Analyst Workbench</p>
         <h1>Review workflow rows</h1>
       </div>
-      <button class="button ghost" (click)="loadRows()">Refresh Rows</button>
+      <div class="toolbar">
+        <button class="button" (click)="exportExcel()" [disabled]="!selectedBatchId">Export to Excel</button>
+        <button class="button ghost" (click)="loadRows()">Refresh Rows</button>
+      </div>
     </section>
 
     <section class="panel filters">
@@ -311,6 +314,10 @@ export class WorkbenchComponent implements OnInit {
     const updated = await this.api.patchRow(this.selected.id, this.edit);
     this.rows = this.rows.map((row) => (row.id === updated.id ? updated : row));
     this.selectRow(updated);
+  }
+
+  exportExcel(): void {
+    if (this.selectedBatchId) this.api.exportBatch(this.selectedBatchId, 'xlsx');
   }
 
   tagClass(value: string): string {
